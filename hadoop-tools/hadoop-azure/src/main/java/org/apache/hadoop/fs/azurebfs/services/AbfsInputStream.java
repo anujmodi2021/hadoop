@@ -32,13 +32,13 @@ import org.apache.hadoop.fs.azurebfs.contracts.exceptions.AbfsRestOperationExcep
 import org.apache.hadoop.fs.azurebfs.contracts.exceptions.AzureBlobFileSystemException;
 
 import static java.lang.Math.max;
-import static org.apache.hadoop.fs.azurebfs.constants.FileSystemConfigurations.ONE_KB;
 
 /**
  * The AbfsInputStream for AbfsClient.
  */
 public class AbfsInputStream extends FSInputStream {
   //  Footer size is set to qualify for both ORC and parquet files
+  private static final int ONE_KB = 1024;
   public static final int FOOTER_SIZE = 16 * ONE_KB;
   public static final int MAX_OPTIMIZED_READ_ATTEMPTS = 2;
   private final AbfsClient client;
