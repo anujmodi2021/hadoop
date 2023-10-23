@@ -31,10 +31,16 @@ import org.apache.hadoop.fs.FileSystem.Statistics;
 import org.apache.hadoop.fs.azurebfs.contracts.exceptions.AbfsRestOperationException;
 import org.apache.hadoop.fs.azurebfs.contracts.exceptions.AzureBlobFileSystemException;
 
+import static java.lang.Math.max;
+import static org.apache.hadoop.fs.azurebfs.constants.FileSystemConfigurations.ONE_KB;
+
 /**
  * The AbfsInputStream for AbfsClient.
  */
 public class AbfsInputStream extends FSInputStream {
+  //  Footer size is set to qualify for both ORC and parquet files
+  public static final int FOOTER_SIZE = 16 * ONE_KB;
+  public static final int MAX_OPTIMIZED_READ_ATTEMPTS = 2;
   private final AbfsClient client;
   private final Statistics statistics;
   private final String path;
@@ -53,6 +59,18 @@ public class AbfsInputStream extends FSInputStream {
   private int limit = 0;     // offset of next byte to be read into buffer from service (i.e., upper marker+1
   //                                                      of valid bytes in buffer)
   private boolean closed = false;
+
+  //  Optimisations modify the pointer fields.
+  //  For better resilience the following fields are used to save the
+  //  existing state before optimisation flows.
+  private int limitBkp;
+  private int bCursorBkp;
+  private long fCursorBkp;
+  private long fCursorAfterLastReadBkp;
+
+  private boolean firstRead = true;
+  private boolean isReadSmallFilesCompletelyEnabled = true;
+  private boolean isOptimizeFooterReadEnabled = true;
 
   public AbfsInputStream(
       final AbfsClient client,
@@ -96,7 +114,13 @@ public class AbfsInputStream extends FSInputStream {
     int lastReadBytes;
     int totalReadBytes = 0;
     do {
-      lastReadBytes = readOneBlock(b, currentOff, currentLen);
+      if (shouldReadFully()) {
+        lastReadBytes = readFileCompletely(b, currentOff, currentLen);
+      } else if (shouldReadLastBlock()) {
+        lastReadBytes = readLastBlock(b, currentOff, currentLen);
+      } else {
+        lastReadBytes = readOneBlock(b, currentOff, currentLen);
+      }
       if (lastReadBytes > 0) {
         currentOff += lastReadBytes;
         currentLen -= lastReadBytes;
@@ -109,23 +133,24 @@ public class AbfsInputStream extends FSInputStream {
     return totalReadBytes > 0 ? totalReadBytes : lastReadBytes;
   }
 
+  private boolean shouldReadFully() {
+    return this.firstRead && this.isReadSmallFilesCompletelyEnabled
+        && this.contentLength <= this.bufferSize;
+  }
+
+  private boolean shouldReadLastBlock() {
+    long footerStart = max(0, this.contentLength - FOOTER_SIZE);
+    return this.firstRead && this.isOptimizeFooterReadEnabled
+        && this.fCursor >= footerStart;
+  }
+
   private int readOneBlock(final byte[] b, final int off, final int len) throws IOException {
-    if (closed) {
-      throw new IOException(FSExceptionMessages.STREAM_IS_CLOSED);
-    }
-
-    Preconditions.checkNotNull(b);
-
     if (len == 0) {
       return 0;
     }
 
-    if (this.available() == 0) {
+    if (!validate(b, off, len)) {
       return -1;
-    }
-
-    if (off < 0 || len < 0 || len > b.length - off) {
-      throw new IndexOutOfBoundsException();
     }
 
     //If buffer is empty, then fill the buffer.
@@ -150,6 +175,10 @@ public class AbfsInputStream extends FSInputStream {
         bytesRead = readInternal(fCursor, buffer, 0, b.length, true);
       }
 
+      if (firstRead) {
+        firstRead = false;
+      }
+
       if (bytesRead == -1) {
         return -1;
       }
@@ -159,6 +188,116 @@ public class AbfsInputStream extends FSInputStream {
       fCursorAfterLastRead = fCursor;
     }
 
+    return copyToUserBuffer(b, off, len);
+  }
+
+  private int readFileCompletely(final byte[] b, final int off, final int len)
+      throws IOException {
+    if (len == 0) {
+      return 0;
+    }
+    if (!validate(b, off, len)) {
+      return -1;
+    }
+    savePointerState();
+    // data need to be copied to user buffer from index bCursor, bCursor has
+    // to be the current fCusor
+    bCursor = (int) fCursor;
+    return optimisedRead(b, off, len, 0, contentLength);
+  }
+
+  private int readLastBlock(final byte[] b, final int off, final int len)
+      throws IOException {
+    if (len == 0) {
+      return 0;
+    }
+    if (!validate(b, off, len)) {
+      return -1;
+    }
+    savePointerState();
+    // data need to be copied to user buffer from index bCursor,
+    // AbfsInutStream buffer is going to contain data from last block start. In
+    // that case bCursor will be set to fCursor - lastBlockStart
+    long lastBlockStart = max(0, contentLength - bufferSize);
+    bCursor = (int) (fCursor - lastBlockStart);
+    // 0 if contentlength is < buffersize
+    long actualLenToRead = Math.min(bufferSize, contentLength);
+    return optimisedRead(b, off, len, lastBlockStart, actualLenToRead);
+  }
+
+  private int optimisedRead(final byte[] b, final int off, final int len,
+      final long readFrom, final long actualLen) throws IOException {
+    fCursor = readFrom;
+    int totalBytesRead = 0;
+    int lastBytesRead = 0;
+    try {
+      buffer = new byte[bufferSize];
+      for (int i = 0;
+          i < MAX_OPTIMIZED_READ_ATTEMPTS && fCursor < contentLength; i++) {
+        lastBytesRead = readInternal(fCursor, buffer, limit,
+            (int) actualLen - limit, true);
+        if (lastBytesRead > 0) {
+          totalBytesRead += lastBytesRead;
+          limit += lastBytesRead;
+          fCursor += lastBytesRead;
+          fCursorAfterLastRead = fCursor;
+        }
+      }
+    } catch (IOException e) {
+      restorePointerState();
+      return readOneBlock(b, off, len);
+    } finally {
+      firstRead = false;
+    }
+    if (totalBytesRead < 1) {
+      restorePointerState();
+      return -1;
+    }
+    //  If the read was partial and the user requested part of data has
+    //  not read then fallback to readoneblock. When limit is smaller than
+    //  bCursor that means the user requested data has not been read.
+    if (fCursor < contentLength && bCursor > limit) {
+      restorePointerState();
+      return readOneBlock(b, off, len);
+    }
+    return copyToUserBuffer(b, off, len);
+  }
+
+  private void savePointerState() {
+    //  Saving the current state for fall back ifn case optimization fails
+    this.limitBkp = this.limit;
+    this.fCursorBkp = this.fCursor;
+    this.fCursorAfterLastReadBkp = this.fCursorAfterLastRead;
+    this.bCursorBkp = this.bCursor;
+  }
+
+  private void restorePointerState() {
+    //  Saving the current state for fall back ifn case optimization fails
+    this.limit = this.limitBkp;
+    this.fCursor = this.fCursorBkp;
+    this.fCursorAfterLastRead = this.fCursorAfterLastReadBkp;
+    this.bCursor = this.bCursorBkp;
+  }
+
+  private boolean validate(final byte[] b, final int off, final int len)
+      throws IOException {
+    if (closed) {
+      throw new IOException(FSExceptionMessages.STREAM_IS_CLOSED);
+    }
+
+    Preconditions.checkNotNull(b);
+
+    if (this.available() == 0) {
+      return false;
+    }
+
+    if (off < 0 || len < 0 || len > b.length - off) {
+      throw new IndexOutOfBoundsException();
+    }
+    return true;
+  }
+
+  private int copyToUserBuffer(byte[] b, int off, int len){
     //If there is anything in the buffer, then return lesser of (requested bytes) and (bytes in buffer)
     //(bytes returned may be less than requested)
     int bytesRemaining = limit - bCursor;
