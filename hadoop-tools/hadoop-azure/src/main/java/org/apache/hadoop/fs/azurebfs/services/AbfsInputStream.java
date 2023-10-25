@@ -25,6 +25,7 @@ import java.net.HttpURLConnection;
 
 import com.google.common.base.Preconditions;
 
+import org.apache.curator.shaded.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.fs.FSExceptionMessages;
 import org.apache.hadoop.fs.FSInputStream;
 import org.apache.hadoop.fs.FileSystem.Statistics;
@@ -526,5 +527,34 @@ public class AbfsInputStream extends FSInputStream {
   @Override
   public boolean markSupported() {
     return false;
+  }
+
+  byte[] getBuffer() {
+    return buffer;
+  }
+
+  @VisibleForTesting
+  public int getBufferSize() {
+    return bufferSize;
+  }
+
+  @VisibleForTesting
+  int getBCursor() {
+    return this.bCursor;
+  }
+
+  @VisibleForTesting
+  long getFCursor() {
+    return this.fCursor;
+  }
+
+  @VisibleForTesting
+  long getFCursorAfterLastRead() {
+    return this.fCursorAfterLastRead;
+  }
+
+  @VisibleForTesting
+  long getLimit() {
+    return this.limit;
   }
 }
