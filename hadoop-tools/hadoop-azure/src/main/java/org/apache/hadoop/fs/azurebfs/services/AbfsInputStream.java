@@ -557,4 +557,14 @@ public class AbfsInputStream extends FSInputStream {
   long getLimit() {
     return this.limit;
   }
+  @VisibleForTesting
+  public void setIsReadSmallFilesCompletelyEnabled(boolean isReadSmallFilesCompletelyEnabled) {
+    this.isReadSmallFilesCompletelyEnabled = isReadSmallFilesCompletelyEnabled;
+  }
+
+  @VisibleForTesting
+  public void setIsOptimizeFooterReadEnabled(boolean isOptimizeFooterReadEnabled) {
+    this.isOptimizeFooterReadEnabled = isOptimizeFooterReadEnabled;
+  }
+
 }

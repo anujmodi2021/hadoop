@@ -39,6 +39,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 import org.mockito.ArgumentMatcher;
+import org.mockito.ArgumentMatcher.*;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
@@ -319,18 +320,19 @@ public class ITestWasbRemoteCallHelper
 
 
 
-    class HttpGetForService1 extends ArgumentMatcher<HttpGet>{
-      @Override public boolean matches(Object o) {
-        return checkHttpGetMatchHost((HttpGet) o, "localhost1");
+    class HttpGetForService1 implements ArgumentMatcher<HttpGet> {
+      @Override
+      public boolean matches(final HttpGet httpGet) {
+        return checkHttpGetMatchHost((HttpGet) httpGet, "localhost1");
       }
     }
-    class HttpGetForService2 extends ArgumentMatcher<HttpGet>{
-      @Override public boolean matches(Object o) {
+    class HttpGetForService2 implements ArgumentMatcher<HttpGet>{
+      @Override public boolean matches(HttpGet o) {
         return checkHttpGetMatchHost((HttpGet) o, "localhost2");
       }
     }
-    class HttpGetForServiceLocal extends ArgumentMatcher<HttpGet>{
-      @Override public boolean matches(Object o) {
+    class HttpGetForServiceLocal implements ArgumentMatcher<HttpGet>{
+      @Override public boolean matches(HttpGet o) {
         try {
           return checkHttpGetMatchHost((HttpGet) o, InetAddress.getLocalHost().getCanonicalHostName());
         } catch (UnknownHostException e) {
@@ -401,18 +403,18 @@ public class ITestWasbRemoteCallHelper
     Mockito.when(mockHttpResponseService3.getEntity())
         .thenReturn(mockHttpEntity);
 
-    class HttpGetForService1 extends ArgumentMatcher<HttpGet>{
-      @Override public boolean matches(Object o) {
+    class HttpGetForService1 implements ArgumentMatcher<HttpGet>{
+      @Override public boolean matches(HttpGet o) {
         return checkHttpGetMatchHost((HttpGet) o, "localhost1");
       }
     }
-    class HttpGetForService2 extends ArgumentMatcher<HttpGet>{
-      @Override public boolean matches(Object o) {
+    class HttpGetForService2 implements ArgumentMatcher<HttpGet>{
+      @Override public boolean matches(HttpGet o) {
         return checkHttpGetMatchHost((HttpGet) o, "localhost2");
       }
     }
-    class HttpGetForService3 extends ArgumentMatcher<HttpGet> {
-      @Override public boolean matches(Object o){
+    class HttpGetForService3 implements ArgumentMatcher<HttpGet> {
+      @Override public boolean matches(HttpGet o){
         try {
           return checkHttpGetMatchHost((HttpGet) o, InetAddress.getLocalHost().getCanonicalHostName());
         } catch (UnknownHostException e) {

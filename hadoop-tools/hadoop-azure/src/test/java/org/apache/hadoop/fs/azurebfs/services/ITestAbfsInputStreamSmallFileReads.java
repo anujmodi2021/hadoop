@@ -19,6 +19,7 @@
 package org.apache.hadoop.fs.azurebfs.services;
 
 import java.io.IOException;
+import java.util.Map;
 
 import org.junit.Test;
 
@@ -28,7 +29,9 @@ import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem;
 
-import static org.mockito.Matchers.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 
@@ -44,9 +47,15 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
     testNumBackendCalls(true);
   }
 
+  @Test
+  public void testMultipleServerCallsAreMadeWhenTheConfIsFalse()
+      throws Exception {
+    testNumBackendCalls(false);
+  }
+
   private void testNumBackendCalls(boolean readSmallFilesCompletely)
       throws Exception {
-    final AzureBlobFileSystem fs = getFileSystem(readSmallFilesCompletely);
+    final AzureBlobFileSystem fs = getFileSystem();
     for (int i = 1; i <= 4; i++) {
       String fileName = methodName.getMethodName() + i;
       int fileSize = i * ONE_MB;
@@ -56,6 +65,11 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
       try (FSDataInputStream iStream = fs.open(testFilePath)) {
         byte[] buffer = new byte[length];
 
+        AbfsInputStream abfsInputStream = (AbfsInputStream) iStream
+            .getWrappedStream();
+        abfsInputStream.setIsReadSmallFilesCompletelyEnabled(readSmallFilesCompletely);
+        abfsInputStream.setIsOptimizeFooterReadEnabled(false);
+
         iStream.seek(seekPos(SeekTo.END, fileSize, length));
         iStream.read(buffer, 0, length);
 
@@ -64,6 +78,12 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
 
         iStream.seek(seekPos(SeekTo.BEGIN, fileSize, length));
         iStream.read(buffer, 0, length);
+
+        if (readSmallFilesCompletely) {
+          System.out.println("=================================== No. of Conn: 1 ============================================");
+        } else {
+          System.out.println("=================================== No. of Conn: 3 ============================================");
+        }
       }
     }
   }
@@ -74,65 +94,65 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
     testSeekAndReadWithConf(SeekTo.BEGIN, 2, 4, true);
   }
 
-//  @Test
-//  public void testSeekToBeginingAndReadSmallFileWithConfFalse()
-//      throws Exception {
-//    testSeekAndReadWithConf(SeekTo.BEGIN, 2, 4, false);
-//  }
+  @Test
+  public void testSeekToBeginingAndReadSmallFileWithConfFalse()
+      throws Exception {
+    testSeekAndReadWithConf(SeekTo.BEGIN, 2, 4, false);
+  }
 
   @Test
   public void testSeekToBeginingAndReadBigFileWithConfTrue() throws Exception {
     testSeekAndReadWithConf(SeekTo.BEGIN, 5, 6, true);
   }
 
-//  @Test
-//  public void testSeekToBeginingAndReadBigFileWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(SeekTo.BEGIN, 5, 6, false);
-//  }
+  @Test
+  public void testSeekToBeginingAndReadBigFileWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(SeekTo.BEGIN, 5, 6, false);
+  }
 
   @Test
   public void testSeekToEndAndReadSmallFileWithConfTrue() throws Exception {
     testSeekAndReadWithConf(SeekTo.END, 2, 4, true);
   }
 
-//  @Test
-//  public void testSeekToEndAndReadSmallFileWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(SeekTo.END, 2, 4, false);
-//  }
+  @Test
+  public void testSeekToEndAndReadSmallFileWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(SeekTo.END, 2, 4, false);
+  }
 
   @Test
   public void testSeekToEndAndReadBigFileWithConfTrue() throws Exception {
     testSeekAndReadWithConf(SeekTo.END, 5, 6, true);
   }
 
-//  @Test
-//  public void testSeekToEndAndReaBigFiledWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(SeekTo.END, 5, 6, false);
-//  }
+  @Test
+  public void testSeekToEndAndReaBigFiledWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(SeekTo.END, 5, 6, false);
+  }
 
   @Test
   public void testSeekToMiddleAndReadSmallFileWithConfTrue() throws Exception {
     testSeekAndReadWithConf(SeekTo.MIDDLE, 2, 4, true);
   }
 
-//  @Test
-//  public void testSeekToMiddleAndReadSmallFileWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(SeekTo.MIDDLE, 2, 4, false);
-//  }
+  @Test
+  public void testSeekToMiddleAndReadSmallFileWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(SeekTo.MIDDLE, 2, 4, false);
+  }
 
   @Test
   public void testSeekToMiddleAndReaBigFileWithConfTrue() throws Exception {
     testSeekAndReadWithConf(SeekTo.MIDDLE, 5, 6, true);
   }
 
-//  @Test
-//  public void testSeekToMiddleAndReadBigFileWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(SeekTo.MIDDLE, 5, 6, false);
-//  }
+  @Test
+  public void testSeekToMiddleAndReadBigFileWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(SeekTo.MIDDLE, 5, 6, false);
+  }
 
   private void testSeekAndReadWithConf(SeekTo seekTo, int startFileSizeInMB,
       int endFileSizeInMB, boolean readSmallFilesCompletely) throws Exception {
-    final AzureBlobFileSystem fs = getFileSystem(readSmallFilesCompletely);
+    final AzureBlobFileSystem fs = getFileSystem();
     for (int i = startFileSizeInMB; i <= endFileSizeInMB; i++) {
       String fileName = methodName.getMethodName() + i;
       int fileSize = i * ONE_MB;
@@ -140,7 +160,7 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
       Path testFilePath = createFileWithContent(fs, fileName, fileContent);
       int length = ONE_KB;
       int seekPos = seekPos(seekTo, fileSize, length);
-      seekReadAndTest(fs, testFilePath, seekPos, length, fileContent);
+      seekReadAndTest(fs, testFilePath, seekPos, length, fileContent, readSmallFilesCompletely);
     }
   }
 
@@ -155,24 +175,29 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
   }
 
   private void seekReadAndTest(FileSystem fs, Path testFilePath, int seekPos,
-      int length, byte[] fileContent)
+      int length, byte[] fileContent, boolean readSmallFilesCompletely)
       throws IOException, NoSuchFieldException, IllegalAccessException {
     AbfsConfiguration conf = getAbfsStore(fs).getAbfsConfiguration();
-    try (FSDataInputStream iStream = fs.open(testFilePath)) {
+    try {
+      FSDataInputStream iStream = fs.open(testFilePath);
+      AbfsInputStream abfsInputStream = (AbfsInputStream) iStream
+          .getWrappedStream();
+      abfsInputStream.setIsReadSmallFilesCompletelyEnabled(readSmallFilesCompletely);
+      abfsInputStream.setIsOptimizeFooterReadEnabled(false);
+      iStream = new FSDataInputStream(abfsInputStream);
+
       seek(iStream, seekPos);
       byte[] buffer = new byte[length];
       int bytesRead = iStream.read(buffer, 0, length);
       assertEquals(bytesRead, length);
       assertContentReadCorrectly(fileContent, seekPos, length, buffer);
-      AbfsInputStream abfsInputStream = (AbfsInputStream) iStream
-          .getWrappedStream();
 
       final int readBufferSize = conf.getReadBufferSize();
       final int fileContentLength = fileContent.length;
       final boolean smallFile = fileContentLength <= readBufferSize;
       int expectedLimit, expectedFCursor;
       int expectedBCursor;
-      if (true && smallFile) {
+      if (readSmallFilesCompletely && smallFile) {
         assertBuffersAreEqual(fileContent, abfsInputStream.getBuffer(), conf);
         expectedFCursor = fileContentLength;
         expectedLimit = fileContentLength;
@@ -196,6 +221,8 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
       assertEquals(expectedFCursor, abfsInputStream.getFCursorAfterLastRead());
       assertEquals(expectedBCursor, abfsInputStream.getBCursor());
       assertEquals(expectedLimit, abfsInputStream.getLimit());
+    } catch (Exception e) {
+      throw e;
     }
   }
 
@@ -203,7 +230,7 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
   public void testPartialReadWithNoData() throws Exception {
     for (int i = 2; i <= 4; i++) {
       int fileSize = i * ONE_MB;
-      final AzureBlobFileSystem fs = getFileSystem(true);
+      final AzureBlobFileSystem fs = getFileSystem();
       String fileName = methodName.getMethodName() + i;
       byte[] fileContent = getRandomBytesArray(fileSize);
       Path testFilePath = createFileWithContent(fs, fileName, fileContent);
@@ -221,6 +248,7 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
     try {
       AbfsInputStream abfsInputStream = (AbfsInputStream) iStream
           .getWrappedStream();
+      abfsInputStream.setIsReadSmallFilesCompletelyEnabled(true);
       abfsInputStream = spy(abfsInputStream);
       doReturn(10)
           .doReturn(10)
@@ -248,7 +276,7 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
   public void testPartialReadWithSomeData() throws Exception {
     for (int i = 2; i <= 4; i++) {
       int fileSize = i * ONE_MB;
-      final AzureBlobFileSystem fs = getFileSystem(true);
+      final AzureBlobFileSystem fs = getFileSystem();
       String fileName = methodName.getMethodName() + i;
       byte[] fileContent = getRandomBytesArray(fileSize);
       Path testFilePath = createFileWithContent(fs, fileName, fileContent);
@@ -265,6 +293,7 @@ public class ITestAbfsInputStreamSmallFileReads extends ITestAbfsInputStream {
     try {
       AbfsInputStream abfsInputStream = (AbfsInputStream) iStream
           .getWrappedStream();
+      abfsInputStream.setIsReadSmallFilesCompletelyEnabled(true);
       abfsInputStream = spy(abfsInputStream);
       //  first readRemote, will return first 10 bytes
       //  second readRemote, seekPos - someDataLength(10) will reach the

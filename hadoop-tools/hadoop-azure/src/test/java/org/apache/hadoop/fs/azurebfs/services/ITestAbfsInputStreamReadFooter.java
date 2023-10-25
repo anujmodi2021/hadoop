@@ -32,7 +32,9 @@ import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
-import static org.mockito.Matchers.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 
@@ -51,18 +53,31 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
     testNumBackendCalls(true);
   }
 
+  @Test
+  public void testMultipleServerCallsAreMadeWhenTheConfIsFalse()
+      throws Exception {
+    testNumBackendCalls(false);
+  }
+
   private void testNumBackendCalls(boolean optimizeFooterRead)
       throws Exception {
     for (int i = 1; i <= 4; i++) {
       int fileSize = i * ONE_MB;
-      final AzureBlobFileSystem fs = getFileSystem(optimizeFooterRead,
-          fileSize);
+      final AzureBlobFileSystem fs = getFileSystem();
       String fileName = methodName.getMethodName() + i;
       byte[] fileContent = getRandomBytesArray(fileSize);
       Path testFilePath = createFileWithContent(fs, fileName, fileContent);
       int length = AbfsInputStream.FOOTER_SIZE;
-      try (FSDataInputStream iStream = fs.open(testFilePath)) {
+      try {
+        FSDataInputStream iStream = fs.open(testFilePath);
         byte[] buffer = new byte[length];
+
+        AbfsInputStream abfsInputStream = (AbfsInputStream) iStream
+            .getWrappedStream();
+        abfsInputStream.setIsReadSmallFilesCompletelyEnabled(false);
+        abfsInputStream.setIsOptimizeFooterReadEnabled(optimizeFooterRead);
+
+        iStream = new FSDataInputStream(abfsInputStream);
 
         iStream.seek(fileSize - 8);
         iStream.read(buffer, 0, length);
@@ -72,6 +87,14 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
 
         iStream.seek(fileSize - (TWENTY * ONE_KB));
         iStream.read(buffer, 0, length);
+
+        if (optimizeFooterRead) {
+          System.out.println("=================================== No. of Conn: 1 ============================================");
+        } else {
+          System.out.println("=================================== No. of Conn: 3 ============================================");
+        }
+      } catch (Exception e) {
+        throw e;
       }
     }
   }
@@ -81,62 +104,61 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
     testSeekAndReadWithConf(true, SeekTo.BEGIN);
   }
 
-//  @Test
-//  public void testSeekToBeginAndReadWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(false, SeekTo.BEGIN);
-//  }
+  @Test
+  public void testSeekToBeginAndReadWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(false, SeekTo.BEGIN);
+  }
 
   @Test
   public void testSeekToBeforeFooterAndReadWithConfTrue() throws Exception {
     testSeekAndReadWithConf(true, SeekTo.BEFORE_FOOTER_START);
   }
 
-//  @Test
-//  public void testSeekToBeforeFooterAndReadWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(false, SeekTo.BEFORE_FOOTER_START);
-//  }
+  @Test
+  public void testSeekToBeforeFooterAndReadWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(false, SeekTo.BEFORE_FOOTER_START);
+  }
 
   @Test
   public void testSeekToFooterAndReadWithConfTrue() throws Exception {
     testSeekAndReadWithConf(true, SeekTo.AT_FOOTER_START);
   }
 
-//  @Test
-//  public void testSeekToFooterAndReadWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(false, SeekTo.AT_FOOTER_START);
-//  }
+  @Test
+  public void testSeekToFooterAndReadWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(false, SeekTo.AT_FOOTER_START);
+  }
 
   @Test
   public void testSeekToAfterFooterAndReadWithConfTrue() throws Exception {
     testSeekAndReadWithConf(true, SeekTo.AFTER_FOOTER_START);
   }
 
-//  @Test
-//  public void testSeekToToAfterFooterAndReadWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(false, SeekTo.AFTER_FOOTER_START);
-//  }
+  @Test
+  public void testSeekToToAfterFooterAndReadWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(false, SeekTo.AFTER_FOOTER_START);
+  }
 
   @Test
   public void testSeekToEndAndReadWithConfTrue() throws Exception {
     testSeekAndReadWithConf(true, SeekTo.END);
   }
 
-//  @Test
-//  public void testSeekToEndAndReadWithConfFalse() throws Exception {
-//    testSeekAndReadWithConf(false, SeekTo.END);
-//  }
+  @Test
+  public void testSeekToEndAndReadWithConfFalse() throws Exception {
+    testSeekAndReadWithConf(false, SeekTo.END);
+  }
 
   private void testSeekAndReadWithConf(boolean optimizeFooterRead,
       SeekTo seekTo) throws Exception {
     for (int i = 2; i <= 6; i++) {
       int fileSize = i * ONE_MB;
-      final AzureBlobFileSystem fs = getFileSystem(optimizeFooterRead,
-          fileSize);
+      final AzureBlobFileSystem fs = getFileSystem();
       String fileName = methodName.getMethodName() + i;
       byte[] fileContent = getRandomBytesArray(fileSize);
       Path testFilePath = createFileWithContent(fs, fileName, fileContent);
       seekReadAndTest(fs, testFilePath, seekPos(seekTo, fileSize), HUNDRED,
-          fileContent);
+          fileContent, optimizeFooterRead);
     }
   }
 
@@ -158,13 +180,18 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
   }
 
   private void seekReadAndTest(final FileSystem fs, final Path testFilePath,
-      final int seekPos, final int length, final byte[] fileContent)
+      final int seekPos, final int length, final byte[] fileContent, boolean optimizeFooterRead)
       throws IOException, NoSuchFieldException, IllegalAccessException {
     AbfsConfiguration conf = getAbfsStore(fs).getAbfsConfiguration();
     long actualContentLength = fileContent.length;
-    try (FSDataInputStream iStream = fs.open(testFilePath)) {
+    try {
+      FSDataInputStream iStream = fs.open(testFilePath);
       AbfsInputStream abfsInputStream = (AbfsInputStream) iStream
           .getWrappedStream();
+      abfsInputStream.setIsReadSmallFilesCompletelyEnabled(false);
+      abfsInputStream.setIsOptimizeFooterReadEnabled(optimizeFooterRead);
+      iStream = new FSDataInputStream(abfsInputStream);
+
       long bufferSize = abfsInputStream.getBufferSize();
       seek(iStream, seekPos);
       byte[] buffer = new byte[length];
@@ -173,7 +200,7 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
       long footerStart = max(0,
           actualContentLength - AbfsInputStream.FOOTER_SIZE);
       boolean optimizationOn =
-          true && seekPos >= footerStart;
+          optimizeFooterRead && seekPos >= footerStart;
 
       long actualLength = length;
       if (seekPos + length > actualContentLength) {
@@ -218,6 +245,8 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
       }
       assertContentReadCorrectly(fileContent, from, (int) abfsInputStream.getLimit(),
           abfsInputStream.getBuffer());
+    } catch (Exception e) {
+      throw e;
     }
   }
 
@@ -226,7 +255,7 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
       throws Exception {
     for (int i = 2; i <= 6; i++) {
       int fileSize = i * ONE_MB;
-      final AzureBlobFileSystem fs = getFileSystem(true, fileSize);
+      final AzureBlobFileSystem fs = getFileSystem();
       String fileName = methodName.getMethodName() + i;
       byte[] fileContent = getRandomBytesArray(fileSize);
       Path testFilePath = createFileWithContent(fs, fileName, fileContent);
@@ -244,6 +273,10 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
     try {
       AbfsInputStream abfsInputStream = (AbfsInputStream) iStream
           .getWrappedStream();
+      if (fileContent.length <= abfsInputStream.getBufferSize()) {
+        abfsInputStream.setIsReadSmallFilesCompletelyEnabled(false);
+      }
+      abfsInputStream.setIsOptimizeFooterReadEnabled(true);
       abfsInputStream = spy(abfsInputStream);
       doReturn(10).doReturn(10).doCallRealMethod().when(abfsInputStream)
           .readRemote(anyLong(), any(), anyInt(), anyInt());
@@ -264,21 +297,21 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
   }
 
   @Test
-  public void testPartialReadWithSomeDat()
+  public void testPartialReadWithSomeData()
       throws Exception {
     for (int i = 3; i <= 6; i++) {
       int fileSize = i * ONE_MB;
-      final AzureBlobFileSystem fs = getFileSystem(true, fileSize);
+      final AzureBlobFileSystem fs = getFileSystem();
       String fileName = methodName.getMethodName() + i;
       byte[] fileContent = getRandomBytesArray(fileSize);
       Path testFilePath = createFileWithContent(fs, fileName, fileContent);
-      testPartialReadWithSomeDat(fs, testFilePath,
+      testPartialReadWithSomeData(fs, testFilePath,
           fileSize - AbfsInputStream.FOOTER_SIZE, AbfsInputStream.FOOTER_SIZE,
           fileContent);
     }
   }
 
-  private void testPartialReadWithSomeDat(final FileSystem fs,
+  private void testPartialReadWithSomeData(final FileSystem fs,
       final Path testFilePath, final int seekPos, final int length,
       final byte[] fileContent)
       throws IOException, NoSuchFieldException, IllegalAccessException {
@@ -286,6 +319,10 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
     try {
       AbfsInputStream abfsInputStream = (AbfsInputStream) iStream
           .getWrappedStream();
+      if (fileContent.length <= abfsInputStream.getBufferSize()) {
+        abfsInputStream.setIsReadSmallFilesCompletelyEnabled(false);
+      }
+      abfsInputStream.setIsOptimizeFooterReadEnabled(true);
       abfsInputStream = spy(abfsInputStream);
       //  first readRemote, will return first 10 bytes
       //  second readRemote returns data till the last 2 bytes
@@ -313,12 +350,6 @@ public class ITestAbfsInputStreamReadFooter extends ITestAbfsInputStream {
     } finally {
       iStream.close();
     }
-  }
-
-  private AzureBlobFileSystem getFileSystem(boolean optimizeFooterRead,
-      int fileSize) throws IOException {
-    final AzureBlobFileSystem fs = getFileSystem();
-    return fs;
   }
 
   private enum SeekTo {
