@@ -29,6 +29,7 @@ public final class HttpQueryParams {
   public static final String QUERY_PARAM_RESOURCE = "resource";
   public static final String QUERY_PARAM_DIRECTORY = "directory";
   public static final String QUERY_PARAM_CONTINUATION = "continuation";
+  public static final String QUERY_PARAM_BEGINFROM = "beginFrom";
   public static final String QUERY_PARAM_RECURSIVE = "recursive";
   public static final String QUERY_PARAM_MAXRESULTS = "maxResults";
   public static final String QUERY_PARAM_ACTION = "action";

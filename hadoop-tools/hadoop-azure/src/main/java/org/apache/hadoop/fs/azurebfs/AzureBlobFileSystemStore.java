@@ -21,6 +21,7 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.lang.reflect.InvocationTargetException;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
@@ -44,9 +45,11 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Hashtable;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.WeakHashMap;
@@ -1283,6 +1286,152 @@ public class AzureBlobFileSystemStore implements Closeable, ListingSupport {
     } while (shouldContinue);
 
     return continuation;
+  }
+
+  public Iterator<FileStatus> listStatusAsIterator(final Path path, final Path marker, TracingContext tracingContext) {
+    String relativePath = path.isRoot() ? AbfsHttpConstants.EMPTY_STRING : getRelativePath(path);
+    final boolean shouldUseMarker = marker != null && path.equals(marker.getParent());
+    final boolean pathMarkerEqual = path.equals(marker);
+    final String markerFileName = marker != null ? marker.getName() : "";
+    final int NUM_KEYS_PER_CALL = 2;
+    LOG.debug("listStatusAsIterator filesystem: {} path: {} marker: {}, shouldUseMarker: {}, maxKeys: {}",
+        client.getFileSystem(),
+        path,
+        marker,
+        shouldUseMarker,
+        NUM_KEYS_PER_CALL);
+
+    return new Iterator<FileStatus>() {
+      private boolean noMoreResult = false;
+      private String nextMarker = null;
+      private String beginFrom = null;
+
+      private Iterator<FileStatus> partialResultIterator = fetchMoreResults();
+
+      private Iterator<FileStatus> fetchMoreResults() {
+        ArrayList<FileStatus> fileStatuses = new ArrayList<FileStatus>();
+        try {
+          if (!noMoreResult && nextMarker == null && shouldUseMarker) {
+            if (markerFileName != null && !markerFileName.isEmpty()) {
+              if (!getIsNamespaceEnabled(tracingContext)) {
+                nextMarker = generateContinuationTokenForNonXns(path.isRoot() ? ROOT_PATH : relativePath, markerFileName);
+              } else {
+                beginFrom = markerFileName;
+                // Set nextMarker as null for extra sanity check.
+                nextMarker = null;
+              }
+            }
+          }
+          nextMarker = listFiles(relativePath, fileStatuses, nextMarker, NUM_KEYS_PER_CALL, false, beginFrom, tracingContext);
+          // From subsequent calls use nextMarker (Continuation Token) only
+          // Setting beginFrom as null for extra sanity check
+          beginFrom = null;
+          if (nextMarker == null || nextMarker.isEmpty()) {
+            LOG.debug("Next marker is null. There will be no more results.");
+            noMoreResult = true;
+          }
+          if (shouldUseMarker) {
+            // We're a little paranoid here, so we filter out results according to the marker
+            fileStatuses.removeIf((fileStatus) -> {
+              return fileStatus.getPath().getName().compareTo(markerFileName) <= 0;
+            });
+          }
+          if (pathMarkerEqual) {
+            // We're a little paranoid here, so we filter out results according to the marker
+            fileStatuses.removeIf((fileStatus) -> {
+              return fileStatus.getPath().equals(marker);
+            });
+          }
+        } catch (IOException e) {
+          LOG.error("Received exception while listing a directory.", e);
+          throw new UncheckedIOException(e);
+        }
+        LOG.debug("Incrementally listed {} files.", fileStatuses.size());
+
+        return fileStatuses.iterator();
+      }
+
+      @Override
+      public boolean hasNext() {
+        while (true) {
+          if (partialResultIterator.hasNext()) {
+            return true;
+          }
+          if (noMoreResult) {
+            return false;
+          }
+          partialResultIterator = fetchMoreResults();
+        }
+      }
+
+      @Override
+      public FileStatus next() {
+        if (hasNext()) {
+          return partialResultIterator.next();
+        } else {
+          throw new NoSuchElementException();
+        }
+      }
+    };
+  }
+
+  private String listFiles(
+      String relativeDirPath,
+      ArrayList<FileStatus> fileStatuses,
+      String continuationToken,
+      int maxKeys,
+      boolean recursive,
+      String beginFrom,
+      TracingContext tracingContext) throws IOException {
+    AbfsRestOperation op = client.listPath(relativeDirPath, recursive, maxKeys, continuationToken, beginFrom, tracingContext);
+    String newToken = op.getResult().getResponseHeader(HttpHeaderConfigurations.X_MS_CONTINUATION);
+    ListResultSchema retrievedSchema = op.getResult().getListResultSchema();
+    if (retrievedSchema == null) {
+      throw new AbfsRestOperationException(
+          AzureServiceErrorCode.PATH_NOT_FOUND.getStatusCode(),
+          AzureServiceErrorCode.PATH_NOT_FOUND.getErrorCode(),
+          "listStatusAsync path not found",
+          null, op.getResult());
+    }
+
+    long blockSize = abfsConfiguration.getAzureBlockSize();
+
+    for (ListResultEntrySchema entry : retrievedSchema.paths()) {
+      final String owner = entry.owner() == null ? userGroupInformation.getUserName() : entry.owner();
+      final String group = entry.group() == null ? userGroupInformation.getPrimaryGroupName() : entry.group();
+      final FsPermission fsPermission = entry.permissions() == null
+          ? new AbfsPermission(FsAction.ALL, FsAction.ALL, FsAction.ALL)
+          : AbfsPermission.valueOf(entry.permissions());
+      final boolean hasAcl = AbfsPermission.isExtendedAcl(entry.permissions());
+      final String isEncryptedWithCPK = "false";
+
+      long lastModifiedMillis = 0;
+      long contentLength = entry.contentLength() == null ? 0 : entry.contentLength();
+      boolean isDirectory = entry.isDirectory() == null ? false : entry.isDirectory();
+      if (entry.lastModified() != null && !entry.lastModified().isEmpty()) {
+        lastModifiedMillis = DateTimeUtils.parseLastModifiedTime(entry.lastModified());
+      }
+
+      Path entryPath = new Path(File.separator + entry.name());
+      entryPath = entryPath.makeQualified(this.uri, entryPath);
+
+      fileStatuses.add(
+          new VersionedFileStatus(
+              owner,
+              group,
+              fsPermission,
+              hasAcl,
+              contentLength,
+              isDirectory,
+              1,
+              blockSize,
+              lastModifiedMillis,
+              entryPath,
+              entry.eTag(),
+              isEncryptedWithCPK));
+    }
+
+    return newToken;
   }
 
   // generate continuation token for xns account

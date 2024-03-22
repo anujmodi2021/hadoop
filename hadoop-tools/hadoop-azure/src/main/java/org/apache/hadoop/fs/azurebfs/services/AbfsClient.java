@@ -369,7 +369,12 @@ public class AbfsClient implements Closeable {
   }
 
   public AbfsRestOperation listPath(final String relativePath, final boolean recursive, final int listMaxResults,
-                                    final String continuation, TracingContext tracingContext)
+      final String continuation, TracingContext tracingContext) throws  IOException {
+    return listPath(relativePath, recursive, listMaxResults, continuation, null, tracingContext);
+  }
+
+  public AbfsRestOperation listPath(final String relativePath, final boolean recursive, final int listMaxResults,
+                                    final String marker, final String beginFrom, TracingContext tracingContext)
       throws IOException {
     final List<AbfsHttpHeader> requestHeaders = createDefaultHeaders();
 
@@ -377,7 +382,8 @@ public class AbfsClient implements Closeable {
     abfsUriQueryBuilder.addQuery(QUERY_PARAM_RESOURCE, FILESYSTEM);
     abfsUriQueryBuilder.addQuery(QUERY_PARAM_DIRECTORY, getDirectoryQueryParameter(relativePath));
     abfsUriQueryBuilder.addQuery(QUERY_PARAM_RECURSIVE, String.valueOf(recursive));
-    abfsUriQueryBuilder.addQuery(QUERY_PARAM_CONTINUATION, continuation);
+    abfsUriQueryBuilder.addQuery(QUERY_PARAM_CONTINUATION, marker);
+    abfsUriQueryBuilder.addQuery(QUERY_PARAM_BEGINFROM, beginFrom);
     abfsUriQueryBuilder.addQuery(QUERY_PARAM_MAXRESULTS, String.valueOf(listMaxResults));
     abfsUriQueryBuilder.addQuery(HttpQueryParams.QUERY_PARAM_UPN, String.valueOf(abfsConfiguration.isUpnUsed()));
     appendSASTokenToQuery(relativePath, SASTokenProvider.LIST_OPERATION, abfsUriQueryBuilder);
