@@ -73,6 +73,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   private final int bufferSize; // default buffer size
   private final int footerReadSize; // default buffer size to read when reading footer
   private final int readAheadQueueDepth;         // initialized in constructor
+  private final int readAheadThreadPoolSize;
   private final String eTag;                  // eTag of the path when InputStream are created
   private final boolean tolerateOobAppends; // whether tolerate Oob Appends
   private final boolean readAheadEnabled; // whether enable readAhead;
@@ -143,6 +144,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
     this.bufferSize = abfsInputStreamContext.getReadBufferSize();
     this.footerReadSize = abfsInputStreamContext.getFooterReadBufferSize();
     this.readAheadQueueDepth = abfsInputStreamContext.getReadAheadQueueDepth();
+    this.readAheadThreadPoolSize = abfsInputStreamContext.getReadAheadThreadPoolSize();
     this.tolerateOobAppends = abfsInputStreamContext.isTolerateOobAppends();
     this.eTag = eTag;
     this.readAheadRange = abfsInputStreamContext.getReadAheadRange();
@@ -165,7 +167,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
 
     // Propagate the config values to ReadBufferManager so that the first instance
     // to initialize can set the readAheadBlockSize
-    ReadBufferManager.setReadBufferManagerConfigs(readAheadBlockSize);
+    ReadBufferManager.setReadBufferManagerConfigs(readAheadBlockSize, readAheadThreadPoolSize);
     if (streamStatistics != null) {
       ioStatistics = streamStatistics.getIOStatistics();
     }

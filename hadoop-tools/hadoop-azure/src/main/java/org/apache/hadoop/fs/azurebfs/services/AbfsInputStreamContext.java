@@ -37,6 +37,8 @@ public class AbfsInputStreamContext extends AbfsStreamContext {
 
   private int readAheadQueueDepth;
 
+  private int readAheadThreadPoolSize;
+
   private boolean tolerateOobAppends;
 
   private boolean isReadAheadEnabled = true;
@@ -76,6 +78,12 @@ public class AbfsInputStreamContext extends AbfsStreamContext {
     this.readAheadQueueDepth = (readAheadQueueDepth >= 0)
             ? readAheadQueueDepth
             : Runtime.getRuntime().availableProcessors();
+    return this;
+  }
+
+  public AbfsInputStreamContext withReadAheadThreadPoolSize(
+      final int readAheadThreadPoolSize) {
+    this.readAheadThreadPoolSize = readAheadThreadPoolSize;
     return this;
   }
 
@@ -171,6 +179,10 @@ public class AbfsInputStreamContext extends AbfsStreamContext {
 
   public int getReadAheadQueueDepth() {
     return readAheadQueueDepth;
+  }
+
+  public int getReadAheadThreadPoolSize() {
+    return readAheadThreadPoolSize;
   }
 
   public boolean isTolerateOobAppends() {

@@ -44,12 +44,13 @@ final class ReadBufferManager {
   private static final int ONE_MB = ONE_KB * ONE_KB;
 
   private static final int NUM_BUFFERS = 16;
-  private static final int NUM_THREADS = 8;
   private static final int DEFAULT_THRESHOLD_AGE_MILLISECONDS = 3000; // have to see if 3 seconds is a good threshold
 
   private static int blockSize = 4 * ONE_MB;
   private static int thresholdAgeMilliseconds = DEFAULT_THRESHOLD_AGE_MILLISECONDS;
-  private Thread[] threads = new Thread[NUM_THREADS];
+
+  private static int prefetchThreadPoolSize = 8;
+  private Thread[] threads = new Thread[prefetchThreadPoolSize];
   private byte[][] buffers;    // array of byte[] buffers, to hold the data that is read
   private Stack<Integer> freeList = new Stack<>();   // indices in buffers[] array that are available
 
@@ -74,12 +75,13 @@ final class ReadBufferManager {
     return bufferManager;
   }
 
-  static void setReadBufferManagerConfigs(int readAheadBlockSize) {
+  static void setReadBufferManagerConfigs(int readAheadBlockSize, int threadCount) {
     if (bufferManager == null) {
       LOGGER.debug(
           "ReadBufferManager not initialized yet. Overriding readAheadBlockSize as {}",
           readAheadBlockSize);
       blockSize = readAheadBlockSize;
+      prefetchThreadPoolSize = threadCount;
     }
   }
 
@@ -89,7 +91,7 @@ final class ReadBufferManager {
       buffers[i] = new byte[blockSize];  // same buffers are reused. The byte array never goes back to GC
       freeList.add(i);
     }
-    for (int i = 0; i < NUM_THREADS; i++) {
+    for (int i = 0; i < prefetchThreadPoolSize; i++) {
       Thread t = new Thread(new ReadBufferWorker(i));
       t.setDaemon(true);
       threads[i] = t;

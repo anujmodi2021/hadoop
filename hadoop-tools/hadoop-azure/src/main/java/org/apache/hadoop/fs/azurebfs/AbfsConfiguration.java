@@ -269,6 +269,10 @@ public class AbfsConfiguration{
       DefaultValue = DEFAULT_READ_AHEAD_QUEUE_DEPTH)
   private int readAheadQueueDepth;
 
+  @IntegerConfigurationValidatorAnnotation(ConfigurationKey = FS_AZURE_READ_AHEAD_THREAD_POOL_SIZE,
+      DefaultValue = DEFAULT_READ_AHEAD_THREAD_POOL_SIZE)
+  private int readAheadThreadPoolSize;
+
   @IntegerConfigurationValidatorAnnotation(ConfigurationKey = FS_AZURE_READ_AHEAD_BLOCK_SIZE,
       MinValue = MIN_BUFFER_SIZE,
       MaxValue = MAX_BUFFER_SIZE,
@@ -792,6 +796,10 @@ public class AbfsConfiguration{
 
   public int getReadAheadQueueDepth() {
     return this.readAheadQueueDepth;
+  }
+
+  public int getReadAheadThreadPoolSize() {
+    return this.readAheadThreadPoolSize;
   }
 
   public int getReadAheadBlockSize() {

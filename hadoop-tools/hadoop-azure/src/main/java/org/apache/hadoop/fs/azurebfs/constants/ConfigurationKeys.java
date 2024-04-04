@@ -172,6 +172,7 @@ public final class ConfigurationKeys {
    *  Must be set to a minimum of 1 if infinite lease directories are to be used. Default is 0. **/
   public static final String FS_AZURE_LEASE_THREADS = "fs.azure.lease.threads";
   public static final String FS_AZURE_READ_AHEAD_QUEUE_DEPTH = "fs.azure.readaheadqueue.depth";
+  public static final String FS_AZURE_READ_AHEAD_THREAD_POOL_SIZE = "fs.azure.read.ahead.thread.pool.size";
   public static final String FS_AZURE_ALWAYS_READ_BUFFER_SIZE = "fs.azure.read.alwaysReadBufferSize";
   public static final String FS_AZURE_READ_AHEAD_BLOCK_SIZE = "fs.azure.read.readahead.blocksize";
   /** Provides a config control to enable or disable ABFS Flush operations -
