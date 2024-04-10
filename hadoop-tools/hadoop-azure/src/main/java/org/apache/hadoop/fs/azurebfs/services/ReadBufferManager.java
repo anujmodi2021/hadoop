@@ -43,13 +43,13 @@ final class ReadBufferManager {
   private static final int ONE_KB = 1024;
   private static final int ONE_MB = ONE_KB * ONE_KB;
 
-  private static final int NUM_BUFFERS = 16;
   private static final int DEFAULT_THRESHOLD_AGE_MILLISECONDS = 3000; // have to see if 3 seconds is a good threshold
 
   private static int blockSize = 4 * ONE_MB;
   private static int thresholdAgeMilliseconds = DEFAULT_THRESHOLD_AGE_MILLISECONDS;
 
   private static int prefetchThreadPoolSize = 8;
+  private static int prefetchBufferPoolSize = 16;
   private Thread[] threads = new Thread[prefetchThreadPoolSize];
   private byte[][] buffers;    // array of byte[] buffers, to hold the data that is read
   private Stack<Integer> freeList = new Stack<>();   // indices in buffers[] array that are available
@@ -82,12 +82,13 @@ final class ReadBufferManager {
           readAheadBlockSize);
       blockSize = readAheadBlockSize;
       prefetchThreadPoolSize = threadCount;
+      prefetchBufferPoolSize = prefetchThreadPoolSize * 2;
     }
   }
 
   private void init() {
-    buffers = new byte[NUM_BUFFERS][];
-    for (int i = 0; i < NUM_BUFFERS; i++) {
+    buffers = new byte[prefetchBufferPoolSize][];
+    for (int i = 0; i < prefetchBufferPoolSize; i++) {
       buffers[i] = new byte[blockSize];  // same buffers are reused. The byte array never goes back to GC
       freeList.add(i);
     }
@@ -594,7 +595,7 @@ final class ReadBufferManager {
       inProgressList.clear();
       completedReadList.clear();
       freeList.clear();
-      for (int i = 0; i < NUM_BUFFERS; i++) {
+      for (int i = 0; i < prefetchBufferPoolSize; i++) {
         buffers[i] = null;
       }
       buffers = null;
@@ -647,6 +648,6 @@ final class ReadBufferManager {
 
   @VisibleForTesting
   int getNumBuffers() {
-    return NUM_BUFFERS;
+    return prefetchBufferPoolSize;
   }
 }
