@@ -21,7 +21,6 @@ package org.apache.hadoop.fs.azurebfs;
 import java.io.FileNotFoundException;
 import java.io.FilterOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.util.EnumSet;
 import java.util.UUID;
 
@@ -35,17 +34,17 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants;
+import org.apache.hadoop.fs.azurebfs.services.AbfsHttpOperation;
 import org.apache.hadoop.fs.azurebfs.security.ContextEncryptionAdapter;
-import org.apache.hadoop.fs.azurebfs.services.AbfsClientUtils;
 import org.apache.hadoop.fs.permission.FsAction;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.test.GenericTestUtils;
+import org.apache.hadoop.test.ReflectionUtils;
 
 import org.apache.hadoop.fs.azurebfs.constants.FSOperationType;
 import org.apache.hadoop.fs.azurebfs.contracts.exceptions.AbfsRestOperationException;
 import org.apache.hadoop.fs.azurebfs.contracts.exceptions.ConcurrentWriteOperationDetectedException;
 import org.apache.hadoop.fs.azurebfs.services.AbfsClient;
-import org.apache.hadoop.fs.azurebfs.services.AbfsHttpOperation;
 import org.apache.hadoop.fs.azurebfs.services.AbfsRestOperation;
 import org.apache.hadoop.fs.azurebfs.services.ITestAbfsClient;
 import org.apache.hadoop.fs.azurebfs.utils.TracingContext;
@@ -57,6 +56,7 @@ import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 import static java.net.HttpURLConnection.HTTP_OK;
 import static java.net.HttpURLConnection.HTTP_PRECON_FAILED;
 
+import static org.apache.hadoop.fs.azurebfs.constants.FileSystemConfigurations.ONE_MB;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -239,7 +239,9 @@ public class ITestAzureBlobFileSystemCreate extends
     intercept(FileNotFoundException.class,
         () -> {
           try (FilterOutputStream fos = new FilterOutputStream(out)) {
-            fos.write('a');
+            byte[] bytes = new byte[8*ONE_MB];
+            fos.write(bytes);
+            fos.write(bytes);
             fos.flush();
             out.hsync();
             fs.delete(testPath, false);
@@ -281,7 +283,6 @@ public class ITestAzureBlobFileSystemCreate extends
     final AzureBlobFileSystem fs =
         (AzureBlobFileSystem) FileSystem.newInstance(currentFs.getUri(),
             config);
-    AbfsClientUtils.setIsNamespaceEnabled(fs.getAbfsClient(), true);
 
     long totalConnectionMadeBeforeTest = fs.getInstrumentationMap()
         .get(CONNECTIONS_MADE.getStatName());
@@ -394,7 +395,9 @@ public class ITestAzureBlobFileSystemCreate extends
         fs.getAbfsStore().getAbfsConfiguration());
 
     AzureBlobFileSystemStore abfsStore = fs.getAbfsStore();
-    abfsStore = setAzureBlobSystemStoreField(abfsStore, "client", mockClient);
+
+    ReflectionUtils.setFinalField(AzureBlobFileSystemStore.class, abfsStore, "client", mockClient);
+
     boolean isNamespaceEnabled = abfsStore
         .getIsNamespaceEnabled(getTestTracingContext(fs, false));
 
@@ -483,22 +486,6 @@ public class ITestAzureBlobFileSystemCreate extends
     // 1. create overwrite=false - fail with server error
     // Create will fail with 500
     validateCreateFileException(AbfsRestOperationException.class, abfsStore);
-  }
-
-  private AzureBlobFileSystemStore setAzureBlobSystemStoreField(
-      final AzureBlobFileSystemStore abfsStore,
-      final String fieldName,
-      Object fieldObject) throws Exception {
-
-    Field abfsClientField = AzureBlobFileSystemStore.class.getDeclaredField(
-        fieldName);
-    abfsClientField.setAccessible(true);
-    Field modifiersField = Field.class.getDeclaredField("modifiers");
-    modifiersField.setAccessible(true);
-    modifiersField.setInt(abfsClientField,
-        abfsClientField.getModifiers() & ~java.lang.reflect.Modifier.FINAL);
-    abfsClientField.set(abfsStore, fieldObject);
-    return abfsStore;
   }
 
   private <E extends Throwable> void validateCreateFileException(final Class<E> exceptionClass, final AzureBlobFileSystemStore abfsStore)

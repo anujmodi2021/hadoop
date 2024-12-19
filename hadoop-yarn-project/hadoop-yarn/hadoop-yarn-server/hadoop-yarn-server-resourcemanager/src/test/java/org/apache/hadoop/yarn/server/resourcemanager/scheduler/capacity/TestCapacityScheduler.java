@@ -88,6 +88,7 @@ import org.apache.hadoop.util.Sets;
 import org.apache.hadoop.service.ServiceStateException;
 import org.apache.hadoop.yarn.server.api.records.NodeStatus;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.QueueMetrics;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.preemption.PreemptionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -2481,12 +2482,12 @@ public class TestCapacityScheduler {
     // positive integer value
     CapacityScheduler cs = setUpCSQueue(maxLifetime, defaultLifetime);
     Assert.assertEquals(maxLifetime,
-        cs.checkAndGetApplicationLifetime("default", 100));
-    Assert.assertEquals(9, cs.checkAndGetApplicationLifetime("default", 9));
+        cs.checkAndGetApplicationLifetime("default", 100, null));
+    Assert.assertEquals(9, cs.checkAndGetApplicationLifetime("default", 9, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", -1));
+        cs.checkAndGetApplicationLifetime("default", -1, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", 0));
+        cs.checkAndGetApplicationLifetime("default", 0, null));
     Assert.assertEquals(maxLifetime,
         cs.getMaximumApplicationLifetime("default"));
 
@@ -2494,11 +2495,11 @@ public class TestCapacityScheduler {
     defaultLifetime = -1;
     // test for default values
     cs = setUpCSQueue(maxLifetime, defaultLifetime);
-    Assert.assertEquals(100, cs.checkAndGetApplicationLifetime("default", 100));
+    Assert.assertEquals(100, cs.checkAndGetApplicationLifetime("default", 100, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", -1));
+        cs.checkAndGetApplicationLifetime("default", -1, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", 0));
+        cs.checkAndGetApplicationLifetime("default", 0, null));
     Assert.assertEquals(maxLifetime,
         cs.getMaximumApplicationLifetime("default"));
 
@@ -2506,32 +2507,32 @@ public class TestCapacityScheduler {
     defaultLifetime = 10;
     cs = setUpCSQueue(maxLifetime, defaultLifetime);
     Assert.assertEquals(maxLifetime,
-        cs.checkAndGetApplicationLifetime("default", 100));
+        cs.checkAndGetApplicationLifetime("default", 100, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", -1));
+        cs.checkAndGetApplicationLifetime("default", -1, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", 0));
+        cs.checkAndGetApplicationLifetime("default", 0, null));
     Assert.assertEquals(maxLifetime,
         cs.getMaximumApplicationLifetime("default"));
 
     maxLifetime = 0;
     defaultLifetime = 0;
     cs = setUpCSQueue(maxLifetime, defaultLifetime);
-    Assert.assertEquals(100, cs.checkAndGetApplicationLifetime("default", 100));
+    Assert.assertEquals(100, cs.checkAndGetApplicationLifetime("default", 100, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", -1));
+        cs.checkAndGetApplicationLifetime("default", -1, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", 0));
+        cs.checkAndGetApplicationLifetime("default", 0, null));
 
     maxLifetime = 10;
     defaultLifetime = -1;
     cs = setUpCSQueue(maxLifetime, defaultLifetime);
     Assert.assertEquals(maxLifetime,
-        cs.checkAndGetApplicationLifetime("default", 100));
+        cs.checkAndGetApplicationLifetime("default", 100, null));
     Assert.assertEquals(maxLifetime,
-        cs.checkAndGetApplicationLifetime("default", -1));
+        cs.checkAndGetApplicationLifetime("default", -1, null));
     Assert.assertEquals(maxLifetime,
-        cs.checkAndGetApplicationLifetime("default", 0));
+        cs.checkAndGetApplicationLifetime("default", 0, null));
 
     maxLifetime = 5;
     defaultLifetime = 10;
@@ -2548,11 +2549,11 @@ public class TestCapacityScheduler {
     defaultLifetime = 10;
     cs = setUpCSQueue(maxLifetime, defaultLifetime);
     Assert.assertEquals(100,
-        cs.checkAndGetApplicationLifetime("default", 100));
+        cs.checkAndGetApplicationLifetime("default", 100, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", -1));
+        cs.checkAndGetApplicationLifetime("default", -1, null));
     Assert.assertEquals(defaultLifetime,
-        cs.checkAndGetApplicationLifetime("default", 0));
+        cs.checkAndGetApplicationLifetime("default", 0, null));
   }
 
   private CapacityScheduler setUpCSQueue(long maxLifetime,
@@ -3046,5 +3047,82 @@ public class TestCapacityScheduler {
     Assert.assertEquals(0, srcQueue.getUsedResources().getMemorySize());
     Assert.assertEquals(0, desQueue.getUsedResources().getMemorySize());
     rm1.close();
+  }
+
+  /**
+   * (YARN-11191) This test ensures that no deadlock happens while the
+   * refreshQueues is called on the preemptionManager (refresh thread) and the
+   * AbstractCSQueue.getTotalKillableResource is called from the schedule thread.
+   *
+   * @throws Exception TestTimedOutException means deadlock
+   */
+  @Test (timeout = 20000)
+  public void testRefreshQueueWithOpenPreemption() throws Exception {
+    CapacitySchedulerConfiguration csConf = new CapacitySchedulerConfiguration();
+    csConf.setQueues(new QueuePath(CapacitySchedulerConfiguration.ROOT), new String[]{"a"});
+    QueuePath a = new QueuePath("root.a");
+    csConf.setCapacity(a, 100);
+    csConf.setQueues(a, new String[]{"b"});
+    QueuePath b = new QueuePath("root.a.b");
+    csConf.setCapacity(b, 100);
+
+    YarnConfiguration conf = new YarnConfiguration(csConf);
+    conf.setClass(YarnConfiguration.RM_SCHEDULER, CapacityScheduler.class,
+        ResourceScheduler.class);
+    RMNodeLabelsManager mgr = new NullRMNodeLabelsManager();
+    mgr.init(conf);
+    try (MockRM rm = new MockRM(csConf)) {
+      CapacityScheduler scheduler = (CapacityScheduler) rm.getResourceScheduler();
+      PreemptionManager preemptionManager = scheduler.getPreemptionManager();
+      rm.getRMContext().setNodeLabelManager(mgr);
+      rm.start();
+
+      AbstractParentQueue queue = (AbstractParentQueue) scheduler.getQueue("a");
+
+      // The scheduler thread holds the queue's read-lock for 5 seconds
+      // then the preemption's read-lock is used
+      Thread schedulerThread = new Thread(() -> {
+        queue.readLock.lock();
+        try {
+          Thread.sleep(5 * 1000);
+        } catch (InterruptedException e) {
+          e.printStackTrace();
+        }
+        preemptionManager.getKillableContainers("a",
+            queue.getDefaultNodeLabelExpression());
+        queue.readLock.unlock();
+      }, "SCHEDULE");
+
+      // The complete thread locks/unlocks the queue's write-lock after 1 seconds
+      Thread completeThread = new Thread(() -> {
+        try {
+          Thread.sleep(1000);
+        } catch (InterruptedException e) {
+          e.printStackTrace();
+        }
+        queue.writeLock.lock();
+        queue.writeLock.unlock();
+      }, "COMPLETE");
+
+
+      // The refresh thread holds the preemption's write-lock after 2 seconds
+      // while it calls the getChildQueues(ByTryLock) that
+      // locks(tryLocks) the queue's read-lock
+      Thread refreshThread = new Thread(() -> {
+        try {
+          Thread.sleep(2 * 1000);
+        } catch (InterruptedException e) {
+          e.printStackTrace();
+        }
+        preemptionManager.refreshQueues(queue.getParent(), queue);
+      }, "REFRESH");
+      schedulerThread.start();
+      completeThread.start();
+      refreshThread.start();
+
+      schedulerThread.join();
+      completeThread.join();
+      refreshThread.join();
+    }
   }
 }

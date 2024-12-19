@@ -37,16 +37,16 @@ import org.apache.hadoop.fs.azurebfs.constants.FSOperationType;
 import org.apache.hadoop.fs.azurebfs.contracts.exceptions.AbfsRestOperationException;
 import org.apache.hadoop.fs.azurebfs.services.AbfsClient;
 import org.apache.hadoop.fs.azurebfs.services.AbfsClientTestUtil;
-import org.apache.hadoop.fs.azurebfs.services.AbfsHttpOperation;
 import org.apache.hadoop.fs.azurebfs.services.AbfsRestOperation;
+import org.apache.hadoop.fs.azurebfs.services.AbfsHttpOperation;
 import org.apache.hadoop.fs.azurebfs.services.ITestAbfsClient;
 import org.apache.hadoop.fs.azurebfs.services.TestAbfsPerfTracker;
-import org.apache.hadoop.fs.azurebfs.utils.TestMockHelpers;
 import org.apache.hadoop.fs.azurebfs.utils.TracingContext;
 import org.apache.hadoop.fs.azurebfs.utils.TracingHeaderValidator;
 import org.apache.hadoop.fs.FileAlreadyExistsException;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.test.ReflectionUtils;
 
 import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
@@ -242,16 +242,17 @@ public class ITestAzureBlobFileSystemDelete extends
         "/NonExistingPath",
         false,
         null,
-        getTestTracingContext(fs, true)));
+        getTestTracingContext(fs, true),
+        fs.getIsNamespaceEnabled(getTestTracingContext(fs, true))));
 
     // mock idempotency check to mimic retried case
     AbfsClient mockClient = ITestAbfsClient.getMockAbfsClient(
         fs.getAbfsStore().getClient(),
         this.getConfiguration());
     AzureBlobFileSystemStore mockStore = mock(AzureBlobFileSystemStore.class);
-    mockStore = TestMockHelpers.setClassField(AzureBlobFileSystemStore.class, mockStore,
+    ReflectionUtils.setFinalField(AzureBlobFileSystemStore.class, mockStore,
         "client", mockClient);
-    mockStore = TestMockHelpers.setClassField(AzureBlobFileSystemStore.class,
+    ReflectionUtils.setFinalField(AzureBlobFileSystemStore.class,
         mockStore,
         "abfsPerfTracker",
         TestAbfsPerfTracker.getAPerfTrackerInstance(this.getConfiguration()));
@@ -263,20 +264,21 @@ public class ITestAzureBlobFileSystemDelete extends
     AbfsRestOperation idempotencyRetOp = Mockito.spy(ITestAbfsClient.getRestOp(
         DeletePath, mockClient, HTTP_METHOD_DELETE,
         ITestAbfsClient.getTestUrl(mockClient, "/NonExistingPath"),
-        ITestAbfsClient.getTestRequestHeaders(mockClient)));
+        ITestAbfsClient.getTestRequestHeaders(mockClient), getConfiguration()));
     idempotencyRetOp.hardSetResult(HTTP_OK);
 
     doReturn(idempotencyRetOp).when(mockClient).deleteIdempotencyCheckOp(any());
     TracingContext tracingContext = getTestTracingContext(fs, false);
     doReturn(tracingContext).when(idempotencyRetOp).createNewTracingContext(any());
-    when(mockClient.deletePath("/NonExistingPath", false, null, tracingContext))
+    when(mockClient.deletePath("/NonExistingPath", false, null,
+        tracingContext, fs.getIsNamespaceEnabled(tracingContext)))
         .thenCallRealMethod();
 
     Assertions.assertThat(mockClient.deletePath(
         "/NonExistingPath",
         false,
         null,
-        tracingContext)
+        tracingContext, fs.getIsNamespaceEnabled(tracingContext))
         .getResult()
         .getStatusCode())
         .describedAs("Idempotency check reports successful "

@@ -245,7 +245,7 @@ public class StringUtils {
   /**
    * @param str
    *          The string array to be parsed into an URI array.
-   * @return <tt>null</tt> if str is <tt>null</tt>, else the URI array
+   * @return <code>null</code> if str is <code>null</code>, else the URI array
    *         equivalent to str.
    * @throws IllegalArgumentException
    *           If any string in str violates RFC&nbsp;2396.
@@ -1149,6 +1149,19 @@ public class StringUtils {
   }
 
   /**
+   * Get stack trace from throwable exception.
+   * @param t Throwable.
+   * @return stack trace string.
+   */
+  public static String getStackTrace(Throwable t) {
+    StringBuilder str = new StringBuilder();
+    for (StackTraceElement e : t.getStackTrace()) {
+      str.append(e.toString() + "\n\t");
+    }
+    return str.toString();
+  }
+
+  /**
    * From a list of command-line arguments, remove both an option and the 
    * next argument.
    *
@@ -1321,7 +1334,7 @@ public class StringUtils {
 
       int inputLineLength = str.length();
       int offset = 0;
-      StringBuffer wrappedLine = new StringBuffer(inputLineLength + 32);
+      StringBuilder wrappedLine = new StringBuilder(inputLineLength + 32);
 
       while(inputLineLength - offset > wrapLength) {
         if(str.charAt(offset) == 32) {

@@ -135,6 +135,8 @@ import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.service.Service.STATE;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.test.LambdaTestUtils;
+
+import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.junit.After;
@@ -1164,6 +1166,21 @@ public class TestRouterRpc {
   }
 
   private void testConcat(
+      String source, String target, boolean failureExpected, boolean verfiyException, String msg) {
+    boolean failure = false;
+    try {
+      // Concat test file with fill block length file via router
+      routerProtocol.concat(target, new String[] {source});
+    } catch (IOException ex) {
+      failure = true;
+      if (verfiyException) {
+        assertExceptionContains(msg, ex);
+      }
+    }
+    assertEquals(failureExpected, failure);
+  }
+
+  private void testConcat(
       String source, String target, boolean failureExpected) {
     boolean failure = false;
     try {
@@ -1224,6 +1241,27 @@ public class TestRouterRpc {
     String badPath = "/unknownlocation/unknowndir";
     compareResponses(routerProtocol, nnProtocol, m,
         new Object[] {badPath, new String[] {routerFile}});
+
+    // Test when concat trg is a empty file
+    createFile(routerFS, existingFile, existingFileSize);
+    String sameRouterEmptyFile =
+        cluster.getFederatedTestDirectoryForNS(sameNameservice) +
+            "_newemptyfile";
+    createFile(routerFS, sameRouterEmptyFile, 0);
+    // Concat in same namespaces, succeeds
+    testConcat(existingFile, sameRouterEmptyFile, false);
+    FileStatus mergedStatus = getFileStatus(routerFS, sameRouterEmptyFile);
+    assertEquals(existingFileSize, mergedStatus.getLen());
+
+    // Test when concat srclist has some empty file, namenode will throw IOException.
+    String srcEmptyFile = cluster.getFederatedTestDirectoryForNS(sameNameservice) + "_srcEmptyFile";
+    createFile(routerFS, srcEmptyFile, 0);
+    String targetFile = cluster.getFederatedTestDirectoryForNS(sameNameservice) + "_targetFile";
+    createFile(routerFS, targetFile, existingFileSize);
+    // Concat in same namespaces, succeeds
+    testConcat(srcEmptyFile, targetFile, true, true,
+        "org.apache.hadoop.ipc.RemoteException(org.apache.hadoop.HadoopIllegalArgumentException): concat: source file "
+            + srcEmptyFile + " is invalid or empty or underConstruction");
   }
 
   @Test
@@ -1843,6 +1881,22 @@ public class TestRouterRpc {
     // We should have the nodes in all the subclusters
     JSONObject jsonObject = new JSONObject(jsonString0);
     assertEquals(NUM_SUBCLUSTERS * NUM_DNS, jsonObject.names().length());
+
+    JSONObject jsonObjectNn =
+        new JSONObject(cluster.getRandomNamenode().getNamenode().getNamesystem().getLiveNodes());
+    // DN report by NN and router should be the same
+    String randomDn = (String) jsonObjectNn.names().get(0);
+    JSONObject randomReportNn = jsonObjectNn.getJSONObject(randomDn);
+    JSONObject randomReportRouter = jsonObject.getJSONObject(randomDn);
+    JSONArray keys = randomReportNn.names();
+    for (int i = 0; i < keys.length(); i++) {
+      String key = keys.getString(i);
+      // Skip the 2 keys that always return -1
+      if (key.equals("blockScheduled") || key.equals("volfails")) {
+        continue;
+      }
+      assertEquals(randomReportRouter.get(key), randomReportNn.get(key));
+    }
 
     // We should be caching this information
     String jsonString1 = metrics.getLiveNodes();

@@ -519,6 +519,14 @@ public class DFSInputStream extends FSInputStream
         // Update the LastLocatedBlock, if offset is for last block.
         if (offset >= locatedBlocks.getFileLength()) {
           setLocatedBlocksFields(newBlocks, getLastBlockLength(newBlocks));
+          // After updating the locatedBlock, the block to which the offset belongs
+          // should be researched like {@link DFSInputStream#getBlockAt(long)}.
+          if (offset >= locatedBlocks.getFileLength()) {
+            return locatedBlocks.getLastLocatedBlock();
+          } else {
+            targetBlockIdx = locatedBlocks.findBlock(offset);
+            assert targetBlockIdx >= 0 && targetBlockIdx < locatedBlocks.locatedBlockCount();
+          }
         } else {
           locatedBlocks.insertRange(targetBlockIdx,
               newBlocks.getLocatedBlocks());
@@ -641,6 +649,7 @@ public class DFSInputStream extends FSInputStream
       targetBlock = retval.block;
 
       try {
+        DFSClientFaultInjector.get().failCreateBlockReader();
         blockReader = getBlockReader(targetBlock, offsetIntoBlock,
             targetBlock.getBlockSize() - offsetIntoBlock, targetAddr,
             storageType, chosenNode);
@@ -663,9 +672,9 @@ public class DFSInputStream extends FSInputStream
           fetchBlockAt(target);
         } else {
           connectFailedOnce = true;
-          DFSClient.LOG.warn("Failed to connect to {} for file {} for block "
-                  + "{}, add to deadNodes and continue. ", targetAddr, src,
-              targetBlock.getBlock(), ex);
+          DFSClient.LOG.warn("Failed to connect to {} for file {} for block {}. Error is {}. "
+              + "Add to deadNodes and continue with other datanodes. ", targetAddr, src,
+              targetBlock.getBlock(), ex.getMessage());
           // Put chosen node into dead list, continue
           addToLocalDeadNodes(chosenNode);
           dfsClient.addNodeToDeadNodeDetector(this, chosenNode);
