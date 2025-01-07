@@ -51,7 +51,7 @@ class ReadBufferWorker implements Runnable {
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
     }
-    ReadBufferManager bufferManager = ReadBufferManager.getBufferManager();
+    ReadBufferManagerV1 bufferManager = ReadBufferManagerV1.getBufferManager();
     ReadBuffer buffer;
     while (true) {
       try {
@@ -73,7 +73,7 @@ class ReadBufferWorker implements Runnable {
               Math.min(buffer.getRequestedLength(), buffer.getBuffer().length),
                   buffer.getTracingContext());
 
-          bufferManager.doneReading(buffer, ReadBufferStatus.AVAILABLE, bytesRead);  // post result back to ReadBufferManager
+          bufferManager.doneReading(buffer, ReadBufferStatus.AVAILABLE, bytesRead);  // post result back to ReadBufferManagerV1
         } catch (IOException ex) {
           buffer.setErrException(ex);
           bufferManager.doneReading(buffer, ReadBufferStatus.READ_FAILED, 0);
