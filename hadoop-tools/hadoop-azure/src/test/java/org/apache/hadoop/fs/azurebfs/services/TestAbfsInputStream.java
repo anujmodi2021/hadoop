@@ -854,7 +854,7 @@ public class TestAbfsInputStream extends
         .describedAs("Unexpected AlwaysReadBufferSize settings")
         .isEqualTo(alwaysReadBufferSizeEnabled);
 
-    Assertions.assertThat(ReadBufferManagerV1.getBufferManager().getReadAheadBlockSize())
+    Assertions.assertThat(inputStream.getReadBufferManager().getReadAheadBlockSize())
         .describedAs("Unexpected readAhead block size")
         .isEqualTo(readAheadBlockSize);
 

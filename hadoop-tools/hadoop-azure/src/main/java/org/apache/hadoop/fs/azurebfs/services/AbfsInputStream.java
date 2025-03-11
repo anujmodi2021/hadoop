@@ -132,6 +132,8 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   /** ABFS instance to be held by the input stream to avoid GC close. */
   private final BackReference fsBackRef;
 
+  private ReadBufferManager readBufferManager = null;
+
   public AbfsInputStream(
           final AbfsClient client,
           final Statistics statistics,
@@ -175,9 +177,15 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
     this.fsBackRef = abfsInputStreamContext.getFsBackRef();
     contextEncryptionAdapter = abfsInputStreamContext.getEncryptionAdapter();
 
-    // Propagate the config values to ReadBufferManager so that the first instance
-    // to initialize can set the readAheadBlockSize
-    ReadBufferManagerV1.setReadBufferManagerConfigs(readAheadBlockSize);
+    if (isReadAheadV2Enabled) {
+      readBufferManager = new ReadBufferManagerV2(readAheadBlockSize);
+    } else {
+      // Propagate the config values to ReadBufferManager so that the first instance
+      // to initialize can set the readAheadBlockSize
+      ReadBufferManagerV1.setReadBufferManagerConfigs(readAheadBlockSize);
+      readBufferManager = ReadBufferManagerV1.getBufferManager();
+    }
+
     if (streamStatistics != null) {
       ioStatistics = streamStatistics.getIOStatistics();
     }
@@ -512,7 +520,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
       while (numReadAheads > 0 && nextOffset < contentLength) {
         LOG.debug("issuing read ahead requestedOffset = {} requested size {}",
             nextOffset, nextSize);
-        ReadBufferManagerV1.getBufferManager().queueReadAhead(this, nextOffset, (int) nextSize,
+        readBufferManager.queueReadAhead(this, nextOffset, (int) nextSize,
                 new TracingContext(readAheadTracingContext));
         nextOffset = nextOffset + nextSize;
         numReadAheads--;
@@ -844,6 +852,11 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   @VisibleForTesting
   public int getReadAheadQueueDepth() {
     return readAheadQueueDepth;
+  }
+
+  @VisibleForTesting
+  public ReadBufferManager getReadBufferManager() {
+    return readBufferManager;
   }
 
   @VisibleForTesting

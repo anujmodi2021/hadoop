@@ -39,8 +39,7 @@ import org.apache.hadoop.classification.VisibleForTesting;
  * The Read Buffer Manager for Rest AbfsClient.
  */
 final class ReadBufferManagerV1 implements ReadBufferManager {
-  private static final Logger LOGGER = LoggerFactory.getLogger(
-      ReadBufferManagerV1.class);
+  private static final Logger LOGGER = LoggerFactory.getLogger(ReadBufferManagerV1.class);
   private static final int ONE_KB = 1024;
   private static final int ONE_MB = ONE_KB * ONE_KB;
 
@@ -91,10 +90,10 @@ final class ReadBufferManagerV1 implements ReadBufferManager {
       freeList.add(i);
     }
     for (int i = 0; i < NUM_THREADS; i++) {
-      Thread t = new Thread(new ReadBufferWorker(i));
+      Thread t = new Thread(new ReadBufferWorker(i, this));
       t.setDaemon(true);
       threads[i] = t;
-      t.setName("ABFS-prefetch-" + i);
+      t.setName("ABFS-prefetch-singleton-" + i);
       t.start();
     }
     ReadBufferWorker.UNLEASH_WORKERS.countDown();
@@ -120,7 +119,8 @@ final class ReadBufferManagerV1 implements ReadBufferManager {
    * @param requestedOffset The offset in the file which shoukd be read
    * @param requestedLength The length to read
    */
-  void queueReadAhead(final AbfsInputStream stream, final long requestedOffset, final int requestedLength,
+  @Override
+  public void queueReadAhead(final AbfsInputStream stream, final long requestedOffset, final int requestedLength,
                       TracingContext tracingContext) {
     if (LOGGER.isTraceEnabled()) {
       LOGGER.trace("Start Queueing readAhead for {} offset {} length {}",
@@ -172,7 +172,8 @@ final class ReadBufferManagerV1 implements ReadBufferManager {
    * @param buffer   the buffer to read data into. Note that the buffer will be written into from offset 0.
    * @return the number of bytes read
    */
-  int getBlock(final AbfsInputStream stream, final long position, final int length, final byte[] buffer)
+  @Override
+  public int getBlock(final AbfsInputStream stream, final long position, final int length, final byte[] buffer)
       throws IOException {
     // not synchronized, so have to be careful with locking
     if (LOGGER.isTraceEnabled()) {
@@ -425,7 +426,8 @@ final class ReadBufferManagerV1 implements ReadBufferManager {
    * @return {@link ReadBuffer}
    * @throws InterruptedException if thread is interrupted
    */
-  ReadBuffer getNextBlockToRead() throws InterruptedException {
+  @Override
+  public ReadBuffer getNextBlockToRead() throws InterruptedException {
     ReadBuffer buffer = null;
     synchronized (this) {
       //buffer = readAheadQueue.take();  // blocking method
@@ -454,7 +456,8 @@ final class ReadBufferManagerV1 implements ReadBufferManager {
    * @param result            the {@link ReadBufferStatus} after the read operation in the worker thread
    * @param bytesActuallyRead the number of bytes that the worker thread was actually able to read
    */
-  void doneReading(final ReadBuffer buffer, final ReadBufferStatus result, final int bytesActuallyRead) {
+  @Override
+  public void doneReading(final ReadBuffer buffer, final ReadBufferStatus result, final int bytesActuallyRead) {
     if (LOGGER.isTraceEnabled()) {
       LOGGER.trace("ReadBufferWorker completed read file {} for offset {} outcome {} bytes {}",
           buffer.getStream().getPath(),  buffer.getOffset(), result, bytesActuallyRead);
@@ -628,7 +631,8 @@ final class ReadBufferManagerV1 implements ReadBufferManager {
   }
 
   @VisibleForTesting
-  int getReadAheadBlockSize() {
+  @Override
+  public int getReadAheadBlockSize() {
     return blockSize;
   }
 
