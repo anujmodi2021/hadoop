@@ -545,6 +545,7 @@ final class ReadBufferManagerV1 implements ReadBufferManager {
    * from {@link ReadBufferManagerV1} when stream is closed.
    * @param stream input stream.
    */
+  @Override
   public synchronized void purgeBuffersForStream(AbfsInputStream stream) {
     LOGGER.debug("Purging stale buffers for AbfsInputStream {} ", stream);
     readAheadQueue.removeIf(readBuffer -> readBuffer.getStream() == stream);

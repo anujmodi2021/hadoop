@@ -529,7 +529,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
       }
 
       // try reading from buffers first
-      receivedBytes = ReadBufferManagerV1.getBufferManager().getBlock(this, position, length, b);
+      receivedBytes = readBufferManager.getBlock(this, position, length, b);
       bytesFromReadAhead += receivedBytes;
       if (receivedBytes > 0) {
         incrementReadOps();
@@ -730,7 +730,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   public synchronized void close() throws IOException {
     LOG.debug("Closing {}", this);
     closed = true;
-    ReadBufferManagerV1.getBufferManager().purgeBuffersForStream(this);
+    readBufferManager.purgeBuffersForStream(this);
     buffer = null; // de-reference the buffer so it can be GC'ed sooner
     if (contextEncryptionAdapter != null) {
       contextEncryptionAdapter.destroy();

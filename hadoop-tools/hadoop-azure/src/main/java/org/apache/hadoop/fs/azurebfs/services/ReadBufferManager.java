@@ -13,4 +13,5 @@ public interface ReadBufferManager {
   void doneReading(final ReadBuffer buffer, final ReadBufferStatus result, final int bytesActuallyRead);
   ReadBuffer getNextBlockToRead() throws InterruptedException;
   int getReadAheadBlockSize();
+  void purgeBuffersForStream(AbfsInputStream stream);
 }

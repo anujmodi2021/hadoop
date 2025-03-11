@@ -43,8 +43,8 @@ final class ReadBufferManagerV2 implements ReadBufferManager {
   private static final int ONE_KB = 1024;
   private static final int ONE_MB = ONE_KB * ONE_KB;
 
-  private static final int NUM_BUFFERS = 16;
-  private static final int NUM_THREADS = 8;
+  private static final int NUM_BUFFERS = 6;
+  private static final int NUM_THREADS = 3;
   private static final int DEFAULT_THRESHOLD_AGE_MILLISECONDS = 3000; // have to see if 3 seconds is a good threshold
 
   private int blockSize = 4 * ONE_MB;
@@ -494,6 +494,7 @@ final class ReadBufferManagerV2 implements ReadBufferManager {
    * from {@link ReadBufferManagerV1} when stream is closed.
    * @param stream input stream.
    */
+  @Override
   public synchronized void purgeBuffersForStream(AbfsInputStream stream) {
     LOGGER.debug("Purging stale buffers for AbfsInputStream {} ", stream);
     readAheadQueue.removeIf(readBuffer -> readBuffer.getStream() == stream);
