@@ -56,7 +56,7 @@ final class ReadBufferManagerV2 implements ReadBufferManager {
   private Queue<ReadBuffer> readAheadQueue = new LinkedList<>(); // queue of requests that are not picked up by any worker thread yet
   private LinkedList<ReadBuffer> inProgressList = new LinkedList<>(); // requests being processed by worker threads
   private LinkedList<ReadBuffer> completedReadList = new LinkedList<>(); // buffers available for reading
-  private final ReentrantLock LOCK = new ReentrantLock();
+  private boolean shutdown = false; // flag to signal threads to stop
 
   public ReadBufferManagerV2(int readAheadBlockSize) {
     setReadBufferManagerConfigs(readAheadBlockSize);
@@ -81,6 +81,25 @@ final class ReadBufferManagerV2 implements ReadBufferManager {
       t.start();
     }
     ReadBufferWorker.UNLEASH_WORKERS.countDown();
+  }
+
+  private void shutdown() {
+    shutdown = true;
+    for (Thread thread : threads) {
+      if (thread != null) {
+        thread.interrupt();
+      }
+    }
+    for (int i = 0; i < buffers.length; i++) {
+      if (buffers[i] != null) {
+        buffers[i] = null;
+      }
+    }
+  }
+
+  @Override
+  public boolean hasShutDown() {
+    return shutdown;
   }
 
   /**
@@ -499,6 +518,7 @@ final class ReadBufferManagerV2 implements ReadBufferManager {
     LOGGER.debug("Purging stale buffers for AbfsInputStream {} ", stream);
     readAheadQueue.removeIf(readBuffer -> readBuffer.getStream() == stream);
     purgeList(stream, completedReadList);
+    shutdown();
   }
 
   /**

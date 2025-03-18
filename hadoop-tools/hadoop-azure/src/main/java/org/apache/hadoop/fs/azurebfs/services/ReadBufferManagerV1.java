@@ -99,6 +99,10 @@ final class ReadBufferManagerV1 implements ReadBufferManager {
     ReadBufferWorker.UNLEASH_WORKERS.countDown();
   }
 
+  public boolean hasShutDown() {
+    return false;
+  }
+
   // hide instance constructor
   private ReadBufferManagerV1() {
     LOGGER.trace("Creating readbuffer manager with HADOOP-18546 patch");
