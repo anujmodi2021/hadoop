@@ -381,6 +381,11 @@ public class AbfsConfiguration{
       DefaultValue = DEFAULT_ENABLE_READAHEAD)
   private boolean enabledReadAhead;
 
+  @BooleanConfigurationValidatorAnnotation(
+      ConfigurationKey = FS_AZURE_ENABLE_READAHEAD_V2,
+      DefaultValue = DEFAULT_ENABLE_READAHEAD_V2)
+  private boolean isReadAheadV2Enabled;
+
   @LongConfigurationValidatorAnnotation(ConfigurationKey = FS_AZURE_SAS_TOKEN_RENEW_PERIOD_FOR_STREAMS,
       MinValue = 0,
       DefaultValue = DEFAULT_SAS_TOKEN_RENEW_PERIOD_FOR_STREAMS_IN_SECONDS)
@@ -1371,6 +1376,15 @@ public class AbfsConfiguration{
   @VisibleForTesting
   void setReadAheadEnabled(final boolean enabledReadAhead) {
     this.enabledReadAhead = enabledReadAhead;
+  }
+
+  public boolean isReadAheadV2Enabled() {
+    return this.isReadAheadV2Enabled;
+  }
+
+  @VisibleForTesting
+  void setReadAheadV2Enabled(final boolean isReadAheadV2Enabled) {
+    this.isReadAheadV2Enabled = isReadAheadV2Enabled;
   }
 
   public int getReadAheadRange() {

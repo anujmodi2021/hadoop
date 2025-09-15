@@ -264,6 +264,12 @@ public final class ConfigurationKeys {
    */
   public static final String FS_AZURE_ENABLE_READAHEAD = "fs.azure.enable.readahead";
 
+  /**
+   * Enable or disable readaheadV2 buffer in AbfsInputStream.
+   * Value: {@value}.
+   */
+  public static final String FS_AZURE_ENABLE_READAHEAD_V2 = "fs.azure.enable.readahead_v2";
+
   /** Setting this true will make the driver use it's own RemoteIterator implementation */
   public static final String FS_AZURE_ENABLE_ABFS_LIST_ITERATOR = "fs.azure.enable.abfslistiterator";
   /** Server side encryption key encoded in Base6format {@value}.*/

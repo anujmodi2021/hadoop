@@ -79,6 +79,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   private final String eTag;                  // eTag of the path when InputStream are created
   private final boolean tolerateOobAppends; // whether tolerate Oob Appends
   private final boolean readAheadEnabled; // whether enable readAhead;
+  private final boolean isReadAheadV2Enabled; // whether enable readAheadV2;
   private final String inputStreamId;
   private final boolean alwaysReadBufferSize;
   /*
@@ -131,6 +132,8 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   /** ABFS instance to be held by the input stream to avoid GC close. */
   private final BackReference fsBackRef;
 
+  private ReadBufferManager readBufferManager = null;
+
   public AbfsInputStream(
           final AbfsClient client,
           final Statistics statistics,
@@ -150,6 +153,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
     this.eTag = eTag;
     this.readAheadRange = abfsInputStreamContext.getReadAheadRange();
     this.readAheadEnabled = abfsInputStreamContext.isReadAheadEnabled();
+    this.isReadAheadV2Enabled = abfsInputStreamContext.isReadAheadV2Enabled();
     this.alwaysReadBufferSize
         = abfsInputStreamContext.shouldReadBufferSizeAlways();
     this.bufferedPreadDisabled = abfsInputStreamContext
@@ -173,9 +177,15 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
     this.fsBackRef = abfsInputStreamContext.getFsBackRef();
     contextEncryptionAdapter = abfsInputStreamContext.getEncryptionAdapter();
 
-    // Propagate the config values to ReadBufferManager so that the first instance
-    // to initialize can set the readAheadBlockSize
-    ReadBufferManager.setReadBufferManagerConfigs(readAheadBlockSize);
+    if (isReadAheadV2Enabled) {
+      readBufferManager = new ReadBufferManagerV2(readAheadBlockSize);
+    } else {
+      // Propagate the config values to ReadBufferManager so that the first instance
+      // to initialize can set the readAheadBlockSize
+      ReadBufferManagerV1.setReadBufferManagerConfigs(readAheadBlockSize);
+      readBufferManager = ReadBufferManagerV1.getBufferManager();
+    }
+
     if (streamStatistics != null) {
       ioStatistics = streamStatistics.getIOStatistics();
     }
@@ -510,7 +520,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
       while (numReadAheads > 0 && nextOffset < contentLength) {
         LOG.debug("issuing read ahead requestedOffset = {} requested size {}",
             nextOffset, nextSize);
-        ReadBufferManager.getBufferManager().queueReadAhead(this, nextOffset, (int) nextSize,
+        readBufferManager.queueReadAhead(this, nextOffset, (int) nextSize,
                 new TracingContext(readAheadTracingContext));
         nextOffset = nextOffset + nextSize;
         numReadAheads--;
@@ -519,7 +529,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
       }
 
       // try reading from buffers first
-      receivedBytes = ReadBufferManager.getBufferManager().getBlock(this, position, length, b);
+      receivedBytes = readBufferManager.getBlock(this, position, length, b);
       bytesFromReadAhead += receivedBytes;
       if (receivedBytes > 0) {
         incrementReadOps();
@@ -720,7 +730,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   public synchronized void close() throws IOException {
     LOG.debug("Closing {}", this);
     closed = true;
-    ReadBufferManager.getBufferManager().purgeBuffersForStream(this);
+    readBufferManager.purgeBuffersForStream(this);
     buffer = null; // de-reference the buffer so it can be GC'ed sooner
     if (contextEncryptionAdapter != null) {
       contextEncryptionAdapter.destroy();
@@ -842,6 +852,11 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   @VisibleForTesting
   public int getReadAheadQueueDepth() {
     return readAheadQueueDepth;
+  }
+
+  @VisibleForTesting
+  public ReadBufferManager getReadBufferManager() {
+    return readBufferManager;
   }
 
   @VisibleForTesting
