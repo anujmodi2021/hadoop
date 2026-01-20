@@ -64,6 +64,8 @@ public class AbfsInputStreamContext extends AbfsStreamContext {
 
   private ContextEncryptionAdapter contextEncryptionAdapter = null;
 
+  private byte[] layout;
+
   /**
    * Constructs a new {@link AbfsInputStreamContext}.
    *
@@ -255,6 +257,17 @@ public class AbfsInputStreamContext extends AbfsStreamContext {
   }
 
   /**
+   * Sets the layout.
+   *
+   * @param layout the layout.
+   * @return this instance.
+   */
+  public AbfsInputStreamContext withLayout(final byte[] layout) {
+    this.layout = layout;
+    return this;
+  }
+
+  /**
    * Finalizes and validates the context configuration.
    * <p>
    * Ensures read-ahead range is valid and aligns read-ahead block size with
@@ -350,5 +363,10 @@ public class AbfsInputStreamContext extends AbfsStreamContext {
   /** @return context encryption adapter. */
   public ContextEncryptionAdapter getEncryptionAdapter() {
     return contextEncryptionAdapter;
+  }
+
+  /** @return the layout. */
+  public byte[] getLayout() {
+    return layout;
   }
 }

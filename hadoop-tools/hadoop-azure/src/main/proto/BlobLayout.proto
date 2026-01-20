@@ -1,0 +1,21 @@
+syntax = "proto3";
+option java_multiple_files = true;
+package XFE.Proto.BlobLayout;
+
+
+message Range
+{
+  uint64 Start = 1;
+  uint64 End = 2;
+  uint32 EndpointIndex = 3;
+  repeated uint32 ReadKeyIndexes = 4;
+}
+
+message BlobLayout
+{
+  string Id = 1;
+  uint64 Expiry = 2;
+  repeated bytes ReadKeys = 3;
+  repeated string Endpoints = 4;
+  repeated Range Ranges = 5;
+}

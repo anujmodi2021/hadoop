@@ -139,5 +139,7 @@ public final class HttpHeaderConfigurations {
    */
   public static final String X_MS_CLIENT_TRANSACTION_ID = "x-ms-client-transaction-id";
 
+  public static final String X_MS_BLOB_LAYOUT = "x-ms-blob-layout";
+
   private HttpHeaderConfigurations() {}
 }

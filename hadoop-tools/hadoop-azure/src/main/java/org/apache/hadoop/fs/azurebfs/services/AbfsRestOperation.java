@@ -104,6 +104,12 @@ public class AbfsRestOperation {
   private byte[] buffer;
   private int bufferOffset;
   private int bufferLength;
+
+  // For operations that have both request and response body (e.g. readWithLayout)
+  private byte[] requestBody;
+  private int requestBodyOffset;
+  private int requestBodyLength;
+
   private int retryCount = 0;
   private boolean isThrottledRequest = false;
   private long maxRetryCount = 0L;
@@ -281,6 +287,42 @@ public class AbfsRestOperation {
   }
 
   /**
+   * Initializes a new REST operation.
+   *
+   * @param operationType The type of the REST operation (Append, ReadFile, etc).
+   * @param client The Blob FS client.
+   * @param method The HTTP method (PUT, PATCH, POST, GET, HEAD, or DELETE).
+   * @param url The full URL including query string parameters.
+   * @param requestHeaders The HTTP request headers.
+   * @param buffer For uploads, this is the request entity body.  For downloads,
+   * this will hold the response entity body.
+   * @param bufferOffset An offset into the buffer where the data begins.
+   * @param bufferLength The length of the data in the buffer.
+   * @param requestBody For operations that have both request and response body.
+   * @param requestBodyOffset An offset into the requestBody where the data begins.
+   * @param requestBodyLength The length of the data in the requestBody.
+   * @param sasToken A sasToken for optional re-use by AbfsInputStream/AbfsOutputStream.
+   */
+  AbfsRestOperation(AbfsRestOperationType operationType,
+      AbfsClient client,
+      String method,
+      URL url,
+      List<AbfsHttpHeader> requestHeaders,
+      byte[] buffer,
+      int bufferOffset,
+      int bufferLength,
+      byte[] requestBody,
+      int requestBodyOffset,
+      int requestBodyLength,
+      String sasToken,
+      final AbfsConfiguration abfsConfiguration) {
+    this(operationType, client, method, url, requestHeaders, buffer, bufferOffset, bufferLength, sasToken, abfsConfiguration);
+    this.requestBody = requestBody;
+    this.requestBodyOffset = requestBodyOffset;
+    this.requestBodyLength = requestBodyLength;
+  }
+
+  /**
    * Execute a AbfsRestOperation. Track the Duration of a request if
    * abfsCounters isn't null.
    * @param tracingContext TracingContext instance to track correlation IDs
@@ -416,7 +458,7 @@ public class AbfsRestOperation {
       incrementCounter(AbfsStatistic.CONNECTIONS_MADE, 1);
       tracingContext.constructHeader(httpOperation, failureReason, retryPolicy.getAbbreviation());
 
-      signRequest(httpOperation, hasRequestBody ? bufferLength : 0, tracingContext.isMetricCall());
+      signRequest(httpOperation, hasRequestBody ? (requestBody != null ? requestBodyLength : bufferLength) : 0, tracingContext.isMetricCall());
 
     } catch (IOException e) {
       LOG.debug("Auth failure: {}, {}", method, url);
@@ -430,10 +472,16 @@ public class AbfsRestOperation {
           httpOperation.getRequestProperties());
       intercept.sendingRequest(operationType, abfsCounters);
       if (hasRequestBody) {
-        httpOperation.sendPayload(buffer, bufferOffset, bufferLength);
-        incrementCounter(AbfsStatistic.SEND_REQUESTS, 1);
-        if (!(operationType.name().equals(PUT_BLOCK_LIST))) {
-          incrementCounter(AbfsStatistic.BYTES_SENT, bufferLength);
+        if (requestBody != null) {
+          httpOperation.sendPayload(requestBody, requestBodyOffset, requestBodyLength);
+          incrementCounter(AbfsStatistic.SEND_REQUESTS, 1);
+          incrementCounter(AbfsStatistic.BYTES_SENT, requestBodyLength);
+        } else {
+          httpOperation.sendPayload(buffer, bufferOffset, bufferLength);
+          incrementCounter(AbfsStatistic.SEND_REQUESTS, 1);
+          if (!(operationType.name().equals(PUT_BLOCK_LIST))) {
+            incrementCounter(AbfsStatistic.BYTES_SENT, bufferLength);
+          }
         }
       }
       httpOperation.processResponse(buffer, bufferOffset, bufferLength);

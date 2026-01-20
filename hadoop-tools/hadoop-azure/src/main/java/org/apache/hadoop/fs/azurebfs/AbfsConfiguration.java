@@ -79,7 +79,11 @@ import static org.apache.hadoop.fs.FileSystem.FS_DEFAULT_NAME_KEY;
 import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.DOT;
 import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.EMPTY_STRING;
 import static org.apache.hadoop.fs.azurebfs.constants.ConfigurationKeys.*;
+import static org.apache.hadoop.fs.azurebfs.constants.ConfigurationKeys.FS_AZURE_ENABLE_GET_LAYOUT_ON_OPEN;
+import static org.apache.hadoop.fs.azurebfs.constants.ConfigurationKeys.FS_AZURE_ENABLE_READ_VECTORED_PARALLEL;
 import static org.apache.hadoop.fs.azurebfs.constants.FileSystemConfigurations.*;
+import static org.apache.hadoop.fs.azurebfs.constants.FileSystemConfigurations.DEFAULT_ENABLE_GET_LAYOUT_ON_OPEN;
+import static org.apache.hadoop.fs.azurebfs.constants.FileSystemConfigurations.DEFAULT_ENABLE_READ_VECTORED_PARALLEL;
 
 /**
  * Configuration for Azure Blob FileSystem.
@@ -303,6 +307,10 @@ public class AbfsConfiguration{
       DefaultValue = DEFAULT_ALWAYS_READ_BUFFER_SIZE)
   private boolean alwaysReadBufferSize;
 
+  @BooleanConfigurationValidatorAnnotation(ConfigurationKey = FS_AZURE_ENABLE_GET_LAYOUT_ON_OPEN,
+      DefaultValue = DEFAULT_ENABLE_GET_LAYOUT_ON_OPEN)
+  private boolean enableGetLayoutOnOpen;
+
   @BooleanConfigurationValidatorAnnotation(ConfigurationKey = FS_AZURE_ENABLE_FLUSH,
       DefaultValue = DEFAULT_ENABLE_FLUSH)
   private boolean enableFlush;
@@ -490,6 +498,8 @@ public class AbfsConfiguration{
   private long sasTokenRenewPeriodForStreamsInSeconds;
 
   @BooleanConfigurationValidatorAnnotation(ConfigurationKey =
+      FS_AZURE_ENABLE_READ_VECTORED_PARALLEL, DefaultValue = DEFAULT_ENABLE_READ_VECTORED_PARALLEL)
+  private boolean enableReadVectoredParallel;  @BooleanConfigurationValidatorAnnotation(ConfigurationKey =
       FS_AZURE_ENABLE_ABFS_LIST_ITERATOR, DefaultValue = DEFAULT_ENABLE_ABFS_LIST_ITERATOR)
   private boolean enableAbfsListIterator;
 
@@ -1218,6 +1228,10 @@ public class AbfsConfiguration{
     return this.sasTokenRenewPeriodForStreamsInSeconds;
   }
 
+  public boolean isReadVectoredParallelEnabled() {
+    return this.enableReadVectoredParallel;
+  }
+
   public String getAzureBlockLocationHost() {
     return this.azureBlockLocationHost;
   }
@@ -1296,6 +1310,10 @@ public class AbfsConfiguration{
 
   public boolean shouldReadBufferSizeAlways() {
     return this.alwaysReadBufferSize;
+  }
+
+  public boolean isGetLayoutOnOpenEnabled() {
+    return this.enableGetLayoutOnOpen;
   }
 
   public boolean isFlushEnabled() {

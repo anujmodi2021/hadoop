@@ -103,6 +103,7 @@ public final class FileSystemConfigurations {
   public static final boolean DEFAULT_ALWAYS_READ_BUFFER_SIZE = false;
   public static final int DEFAULT_READ_AHEAD_BLOCK_SIZE = 4 * ONE_MB;
   public static final int DEFAULT_READ_AHEAD_RANGE = 64 * ONE_KB; // 64 KB
+  public static final boolean DEFAULT_ENABLE_GET_LAYOUT_ON_OPEN = false;
   public static final int MIN_BUFFER_SIZE = 16 * ONE_KB;  // 16 KB
   public static final int MAX_BUFFER_SIZE = 100 * ONE_MB;  // 100 MB
   public static final long MAX_AZURE_BLOCK_SIZE = 256 * 1024 * 1024L; // changing default abfs blocksize to 256MB
@@ -157,6 +158,7 @@ public final class FileSystemConfigurations {
   public static final boolean DEFAULT_ENABLE_CHECK_ACCESS = true;
   public static final boolean DEFAULT_ABFS_LATENCY_TRACK = false;
   public static final long DEFAULT_SAS_TOKEN_RENEW_PERIOD_FOR_STREAMS_IN_SECONDS = 120;
+  public static final boolean DEFAULT_ENABLE_READ_VECTORED_PARALLEL = false;
 
   public static final boolean DEFAULT_ENABLE_READAHEAD = true;
   public static final boolean DEFAULT_ENABLE_READAHEAD_V2 = false;
@@ -240,7 +242,7 @@ public final class FileSystemConfigurations {
    * Default buffer option: {@value}.
    */
   public static final String DATA_BLOCKS_BUFFER_DEFAULT =
-          DATA_BLOCKS_BYTEBUFFER;
+      DATA_BLOCKS_BYTEBUFFER;
 
   /**
    * IO rate limit. Value: {@value}
