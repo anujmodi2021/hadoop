@@ -197,6 +197,7 @@ public final class AbfsHttpConstants {
   public enum ApiVersion {
 
     DEC_12_2019("2019-12-12"),
+    FEB_10_2020("2020-02-10"),
     APR_10_2021("2021-04-10"),
     AUG_03_2023("2023-08-03"),
     NOV_04_2024("2024-11-04"),

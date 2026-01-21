@@ -82,6 +82,7 @@ import org.apache.hadoop.fs.azurebfs.security.ContextEncryptionAdapter;
 import org.apache.hadoop.fs.azurebfs.utils.DateTimeUtils;
 import org.apache.hadoop.fs.azurebfs.utils.EncryptionType;
 import org.apache.hadoop.fs.azurebfs.utils.TracingContext;
+import org.apache.hadoop.fs.azurebfs.utils.UriUtils;
 import org.apache.hadoop.fs.azurebfs.utils.TracingHeaderFormat;
 import org.apache.hadoop.fs.permission.FsAction;
 import org.apache.hadoop.fs.permission.FsPermission;
@@ -111,6 +112,7 @@ import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.FILESYST
 import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.FORWARD_SLASH;
 import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.FORWARD_SLASH_ENCODE;
 import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.HTTP_METHOD_DELETE;
+import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.HTTP_METHOD_GET;
 import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.HTTP_METHOD_HEAD;
 import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.HTTP_METHOD_PUT;
 import static org.apache.hadoop.fs.azurebfs.constants.AbfsHttpConstants.HUNDRED_CONTINUE;
@@ -982,6 +984,96 @@ public abstract class AbfsClient implements Closeable {
       TracingContext tracingContext) throws AzureBlobFileSystemException;
 
   /**
+   * Read the contents of the file at specified path with layout.
+   * @param path of the file to be read.
+   * @param position in the file from where data has to be read.
+   * @param buffer to store the data read.
+   * @param bufferOffset offset in the buffer to start storing the data.
+   * @param bufferLength length of data to be read.
+   * @param eTag to specify conditional headers.
+   * @param cachedSasToken to be used for the authenticating operation.
+   * @param contextEncryptionAdapter to provide encryption context.
+   * @param tracingContext for tracing the server calls.
+   * @param dataKeys byte array containing the data keys.
+   * @return executed rest operation containing response from server.
+   * @throws AzureBlobFileSystemException if rest operation fails.
+   */
+  public AbfsRestOperation readWithLayout(String path,
+      long position,
+      byte[] buffer,
+      int bufferOffset,
+      int bufferLength,
+      String eTag,
+      String cachedSasToken,
+      ContextEncryptionAdapter contextEncryptionAdapter,
+      TracingContext tracingContext,
+      byte[] dataKeys,
+      String endpoint) throws AzureBlobFileSystemException {
+    final List<AbfsHttpHeader> requestHeaders = createDefaultHeaders(ApiVersion.NOV_04_2024);
+    addEncryptionKeyRequestHeaders(path, requestHeaders, false,
+        contextEncryptionAdapter, tracingContext);
+    AbfsHttpHeader rangeHeader = new AbfsHttpHeader("x-ms-range",
+        String.format("bytes=%d-%d", position, position + bufferLength - 1));
+    requestHeaders.add(rangeHeader);
+
+    final AbfsUriQueryBuilder abfsUriQueryBuilder = createDefaultUriQueryBuilder();
+
+    // Add request priority header for prefetch reads
+    addRequestPriorityForPrefetch(requestHeaders, tracingContext);
+
+    // AbfsInputStream/AbfsOutputStream reuse SAS tokens for better performance
+    String sasTokenForReuse = appendSASTokenToQuery(path,
+        SASTokenProvider.READ_OPERATION,
+        abfsUriQueryBuilder, cachedSasToken);
+
+    URL url;
+    String rootUrl = "";
+    try {
+      if (endpoint != null && !endpoint.isEmpty()) {
+        rootUrl = endpoint;
+      } else {
+        URL blobUrl = UriUtils.changeUrlFromDfsToBlob(baseUrl);
+        String blobUrlStr = blobUrl.toString();
+        // Remove filesystem path. baseUrl usually is https://account.dfs.core.windows.net/filesystem
+        // We want https://account.blob.core.windows.net/$decoder
+
+        // Find the start of the path
+        int pathStart = blobUrlStr.indexOf("/", blobUrlStr.indexOf("//") + 2);
+        if (pathStart != -1) {
+          rootUrl = blobUrlStr.substring(0, pathStart);
+        } else {
+          rootUrl = blobUrlStr;
+        }
+      }
+
+      url = new URL(rootUrl + "/$decoder" + abfsUriQueryBuilder.toString());
+    } catch (MalformedURLException e) {
+      throw new InvalidUriException(rootUrl);
+    }
+
+    final AbfsRestOperation op = getAbfsRestOperation(
+        AbfsRestOperationType.ReadFile,
+        AbfsHttpConstants.HTTP_METHOD_POST,
+        url,
+        requestHeaders,
+        buffer,
+        bufferOffset,
+        bufferLength,
+        dataKeys,
+        0,
+        dataKeys.length,
+        sasTokenForReuse);
+    op.execute(tracingContext);
+
+    // Verify the MD5 hash returned by server holds valid on the data received.
+    if (isChecksumValidationEnabled(requestHeaders, rangeHeader, bufferLength)) {
+      verifyCheckSumForRead(buffer, op.getResult(), bufferOffset);
+    }
+
+    return op;
+  }
+
+  /**
    * Delete the file or directory at specified path.
    * @param path to be deleted.
    * @param recursive if the path is a directory, delete recursively.
@@ -1663,6 +1755,49 @@ public abstract class AbfsClient implements Closeable {
         requestHeaders, sasTokenForReuse, abfsConfiguration);
   }
 
+  /**
+   * Creates an AbfsRestOperation with additional parameters for buffer, SAS token and request body.
+   *
+   * @param operationType    The type of the operation.
+   * @param httpMethod       The HTTP method of the operation.
+   * @param url              The URL associated with the operation.
+   * @param requestHeaders   The list of HTTP headers for the request.
+   * @param buffer           The byte buffer containing data for the operation.
+   * @param bufferOffset     The offset within the buffer where the data starts.
+   * @param bufferLength     The length of the data within the buffer.
+   * @param requestBody      The byte buffer containing request body.
+   * @param requestBodyOffset The offset within the request body where the data starts.
+   * @param requestBodyLength The length of the data within the request body.
+   * @param sasTokenForReuse The SAS token for reusing authentication.
+   * @return An AbfsRestOperation instance.
+   */
+  AbfsRestOperation getAbfsRestOperation(final AbfsRestOperationType operationType,
+      final String httpMethod,
+      final URL url,
+      final List<AbfsHttpHeader> requestHeaders,
+      final byte[] buffer,
+      final int bufferOffset,
+      final int bufferLength,
+      final byte[] requestBody,
+      final int requestBodyOffset,
+      final int requestBodyLength,
+      final String sasTokenForReuse) {
+    return new AbfsRestOperation(
+        operationType,
+        this,
+        httpMethod,
+        url,
+        requestHeaders,
+        buffer,
+        bufferOffset,
+        bufferLength,
+        requestBody,
+        requestBodyOffset,
+        requestBodyLength,
+        sasTokenForReuse,
+        abfsConfiguration);
+  }
+
   @VisibleForTesting
   AbfsApacheHttpClient getAbfsApacheHttpClient() {
     return abfsApacheHttpClient;
@@ -1750,6 +1885,72 @@ public abstract class AbfsClient implements Closeable {
    * @throws UnsupportedEncodingException if decoding fails
    */
   public abstract String decodeAttribute(byte[] value) throws UnsupportedEncodingException;
+
+  /**
+   * Get the layout of the blob.
+   * @param path path of the blob.
+   * @param tracingContext for tracing the server calls.
+   * @return byte array containing the layout.
+   * @throws AzureBlobFileSystemException if rest operation fails.
+   */
+  public byte[] getLayout(String path, TracingContext tracingContext) throws AzureBlobFileSystemException {
+    AbfsRestOperation op = getLayoutOperation(path, tracingContext);
+    AbfsHttpOperation result = op.getResult();
+    InputStream stream = result.getListResultStream();
+    if (stream == null) {
+      return null;
+    }
+
+    try {
+      int size = stream.available();
+      byte[] buffer = new byte[size];
+      int read = stream.read(buffer);
+      if (read != size) {
+        LOG.warn("Could not read all bytes from list result stream");
+      }
+      return buffer;
+    } catch (IOException e) {
+      throw new AbfsRestOperationException(
+          result.getStatusCode(),
+          result.getStorageErrorCode(),
+          result.getStorageErrorMessage(),
+          e,
+          result);
+    }
+  }
+
+  /**
+   * Get the layout operation of the blob.
+   * @param path path of the blob.
+   * @param tracingContext for tracing the server calls.
+   * @return AbfsRestOperation containing the layout.
+   * @throws AzureBlobFileSystemException if rest operation fails.
+   */
+  public AbfsRestOperation getLayoutOperation(String path, TracingContext tracingContext) throws AzureBlobFileSystemException {
+    final List<AbfsHttpHeader> requestHeaders = createDefaultHeaders(ApiVersion.NOV_04_2024);
+    requestHeaders.add(new AbfsHttpHeader(HttpHeaderConfigurations.X_MS_BLOB_LAYOUT, "true"));
+    requestHeaders.add(new AbfsHttpHeader(HttpHeaderConfigurations.RANGE, "bytes=0-"));
+
+    final AbfsUriQueryBuilder abfsUriQueryBuilder = createDefaultUriQueryBuilder();
+    appendSASTokenToQuery(path, SASTokenProvider.GET_PROPERTIES_OPERATION,
+        abfsUriQueryBuilder);
+
+    URL url = createRequestUrl(path, abfsUriQueryBuilder.toString());
+    try {
+      url = UriUtils.changeUrlFromDfsToBlob(url);
+    } catch (InvalidUriException e) {
+      LOG.debug("Failed to convert DFS URL to Blob URL", e);
+    }
+
+    final AbfsRestOperation op = getAbfsRestOperation(
+        AbfsRestOperationType.GetPathStatus,
+        HTTP_METHOD_GET,
+        url,
+        requestHeaders);
+
+    op.execute(tracingContext);
+    return op;
+  }
 
   /**
    * Get the dummy success operation.

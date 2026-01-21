@@ -19,6 +19,7 @@ package org.apache.hadoop.fs.azurebfs;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.InvocationTargetException;
@@ -890,13 +891,14 @@ public class AzureBlobFileSystemStore implements Closeable, ListingSupport {
       long contentLength;
       ContextEncryptionAdapter contextEncryptionAdapter = NoContextEncryptionAdapter.getInstance();
       /*
-      * GetPathStatus API has to be called in case of:
-      *   1.  fileStatus is null or not an object of VersionedFileStatus: as eTag
-      *       would not be there in the fileStatus object.
-      *   2.  fileStatus is an object of VersionedFileStatus and the object doesn't
-      *       have encryptionContext field when client's encryptionType is
-      *       ENCRYPTION_CONTEXT.
-      */
+       * GetPathStatus API has to be called in case of:
+       *   1.  fileStatus is null or not an object of VersionedFileStatus: as eTag
+       *       would not be there in the fileStatus object.
+       *   2.  fileStatus is an object of VersionedFileStatus and the object doesn't
+       *       have encryptionContext field when client's encryptionType is
+       *       ENCRYPTION_CONTEXT.
+       */
+      byte[] layout = null;
       if ((fileStatus instanceof VersionedFileStatus) && (
           getClient().getEncryptionType() != EncryptionType.ENCRYPTION_CONTEXT
               || ((VersionedFileStatus) fileStatus).getEncryptionContext()
@@ -917,9 +919,24 @@ public class AzureBlobFileSystemStore implements Closeable, ListingSupport {
               encryptionContext.getBytes(StandardCharsets.UTF_8));
         }
       } else {
-        AbfsHttpOperation op = getClient().getPathStatus(relativePath, false,
-            tracingContext, null).getResult();
-        resourceType = getClient().checkIsDir(op) ? DIRECTORY : FILE;
+        AbfsHttpOperation op;
+        if (abfsConfiguration.isGetLayoutOnOpenEnabled()) {
+          AbfsRestOperation restOp = getClient().getLayoutOperation(relativePath, tracingContext);
+          op = restOp.getResult();
+          InputStream stream = op.getListResultStream();
+          if (stream != null) {
+            int size = stream.available();
+            layout = new byte[size];
+            int read = stream.read(layout);
+            if (read != size) {
+              LOG.warn("Could not read all bytes from list result stream");
+            }
+          }
+        } else {
+          op = getClient().getPathStatus(relativePath, false,
+              tracingContext, null).getResult();
+        }
+        resourceType = /*getClient().checkIsDir(op) ? DIRECTORY :*/ FILE;
         contentLength = extractContentLength(op);
         eTag = op.getResponseHeader(HttpHeaderConfigurations.ETAG);
         /*
@@ -954,7 +971,7 @@ public class AzureBlobFileSystemStore implements Closeable, ListingSupport {
       return new AbfsInputStream(getClient(), statistics, relativePath,
           contentLength, populateAbfsInputStreamContext(
           parameters.map(OpenFileParameters::getOptions),
-          contextEncryptionAdapter),
+          contextEncryptionAdapter).withLayout(layout),
           eTag, tracingContext);
     }
   }

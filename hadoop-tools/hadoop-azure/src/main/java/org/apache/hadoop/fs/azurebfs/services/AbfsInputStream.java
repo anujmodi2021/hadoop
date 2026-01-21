@@ -20,9 +20,24 @@ package org.apache.hadoop.fs.azurebfs.services;
 
 import java.io.EOFException;
 import java.io.FileNotFoundException;
+import java.nio.ByteBuffer;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.IntFunction;
+
+import org.apache.hadoop.fs.impl.CombinedFileRange;
+import org.apache.hadoop.fs.FileRange;
+import org.apache.hadoop.fs.VectoredReadUtils;
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
 import java.util.UUID;
+
+import XFE.Proto.BlobLayout.BlobLayout;
+import XFE.Proto.BlobLayout.Range;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.classification.VisibleForTesting;
@@ -73,7 +88,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   private final AbfsClient client;
   private final Statistics statistics;
   private final String path;
-  private final long contentLength;
+  private long contentLength;
   private final int bufferSize; // default buffer size
   private final int footerReadSize; // default buffer size to read when reading footer
   private final int readAheadQueueDepth;         // initialized in constructor
@@ -133,6 +148,8 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
   /** ABFS instance to be held by the input stream to avoid GC close. */
   private final BackReference fsBackRef;
   private final ReadBufferManager readBufferManager;
+  private final byte[] layout;
+  private BlobLayout blobLayout;
 
   public AbfsInputStream(
           final AbfsClient client,
@@ -177,6 +194,17 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
     }
     this.fsBackRef = abfsInputStreamContext.getFsBackRef();
     contextEncryptionAdapter = abfsInputStreamContext.getEncryptionAdapter();
+    this.layout = abfsInputStreamContext.getLayout();
+    if (this.layout != null) {
+      try {
+        this.blobLayout = BlobLayout.parseFrom(this.layout);
+        if (this.blobLayout.getRangesCount() > 0) {
+          this.contentLength = this.blobLayout.getRanges(this.blobLayout.getRangesCount() - 1).getEnd() + 1;
+        }
+      } catch (IOException e) {
+        LOG.warn("Failed to parse blob layout", e);
+      }
+    }
 
     /*
      * Initialize the ReadBufferManager based on whether readAheadV2 is enabled or not.
@@ -240,6 +268,64 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
       streamStatistics.bytesRead(bytesRead);
     }
     return bytesRead;
+  }
+
+  @Override
+  public void readVectored(List<? extends FileRange> ranges,
+      IntFunction<ByteBuffer> allocate) throws IOException {
+    if (!client.getAbfsConfiguration().isReadVectoredParallelEnabled()) {
+      super.readVectored(ranges, allocate);
+      return;
+    }
+
+    List<? extends FileRange> sortedRanges = VectoredReadUtils.validateAndSortRanges(ranges, Optional.of(contentLength));
+
+    for (FileRange range : sortedRanges) {
+      range.setData(new CompletableFuture<>());
+    }
+
+    List<CombinedFileRange> mergedRanges = VectoredReadUtils.mergeSortedRanges(sortedRanges,
+        minSeekForVectorReads(), minSeekForVectorReads(), maxReadSizeForVectorReads());
+
+    for (CombinedFileRange combinedRange : mergedRanges) {
+      client.submit(() -> {
+        try {
+          ByteBuffer buffer = allocate.apply(combinedRange.getLength());
+          readRangeFrom(combinedRange, buffer);
+          buffer.flip();
+          for (FileRange child : combinedRange.getUnderlying()) {
+            int start = (int) (child.getOffset() - combinedRange.getOffset());
+            int end = start + child.getLength();
+            ByteBuffer childBuffer = buffer.duplicate();
+            childBuffer.position(start);
+            childBuffer.limit(end);
+            child.getData().complete(childBuffer.slice());
+          }
+        } catch (Exception e) {
+          for (FileRange child : combinedRange.getUnderlying()) {
+            child.getData().completeExceptionally(e);
+          }
+        }
+      });
+    }
+  }
+
+  private void readRangeFrom(FileRange range, ByteBuffer buffer) throws IOException {
+    int length = range.getLength();
+    byte[] b;
+    int offset = 0;
+    if (buffer.hasArray()) {
+      b = buffer.array();
+      offset = buffer.arrayOffset() + buffer.position();
+    } else {
+      b = new byte[length];
+    }
+
+    int bytesRead = read(range.getOffset(), b, offset, length);
+
+    if (!buffer.hasArray()) {
+      buffer.put(b, 0, bytesRead);
+    }
   }
 
   @Override
@@ -583,6 +669,7 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
     if (length > (b.length - offset)) {
       throw new IllegalArgumentException("requested read length is more than will fit after requested offset in buffer");
     }
+    length = (int) min(length, contentLength - position);
     final AbfsRestOperation op;
     AbfsPerfTracker tracker = client.getAbfsPerfTracker();
     try (AbfsPerfInfo perfInfo = new AbfsPerfInfo(tracker, "readRemote", "read")) {
@@ -591,9 +678,61 @@ public class AbfsInputStream extends FSInputStream implements CanUnbuffer,
       }
       LOG.trace("Trigger client.read for path={} position={} offset={} length={}", path, position, offset, length);
       tracingContext.setPosition(String.valueOf(position));
-      op = client.read(path, position, b, offset, length,
-          tolerateOobAppends ? "*" : eTag, cachedSasToken.get(),
-          contextEncryptionAdapter, tracingContext);
+
+      byte[] dataKeys = null;
+      String endpoint = null;
+      if (blobLayout != null) {
+        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+          long requestStart = position;
+          long requestEnd = position + length;
+
+          Range bestRange = null;
+          long maxOverlap = 0;
+          Set<Integer> deduplicatedIndexes = new HashSet<>();
+
+          for (Range range : blobLayout.getRangesList()) {
+            long rangeStart = range.getStart();
+            long rangeEnd = range.getEnd();
+
+            long overlapStart = max(requestStart, rangeStart);
+            long overlapEnd = min(requestEnd, rangeEnd);
+            long overlap = max(0, overlapEnd - overlapStart);
+
+            if (overlap > 0) {
+              for (int index : range.getReadKeyIndexesList()) {
+                if (deduplicatedIndexes.add(index)) {
+                  blobLayout.getReadKeys(index).writeTo(outputStream);
+                }
+              }
+            }
+
+            if (overlap > maxOverlap) {
+              maxOverlap = overlap;
+              bestRange = range;
+            }
+          }
+          if (bestRange != null) {
+            int endpointIndex = bestRange.getEndpointIndex();
+            if (endpointIndex < blobLayout.getEndpointsCount()) {
+              endpoint = blobLayout.getEndpoints(endpointIndex);
+            }
+          }
+
+          if (outputStream.size() > 0) {
+            dataKeys = outputStream.toByteArray();
+          }
+        }
+      }
+
+      if (dataKeys != null) {
+        op = client.readWithLayout(path, position, b, offset, length,
+            tolerateOobAppends ? "*" : eTag, cachedSasToken.get(),
+            contextEncryptionAdapter, tracingContext, dataKeys, null);
+      } else {
+        op = client.read(path, position, b, offset, length,
+            tolerateOobAppends ? "*" : eTag, cachedSasToken.get(),
+            contextEncryptionAdapter, tracingContext);
+      }
       cachedSasToken.update(op.getSasToken());
       LOG.debug("issuing HTTP GET request params position = {} b.length = {} "
           + "offset = {} length = {}", position, b.length, offset, length);

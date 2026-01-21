@@ -266,6 +266,8 @@ public final class ConfigurationKeys {
   public static final String FS_AZURE_READ_AHEAD_QUEUE_DEPTH = "fs.azure.readaheadqueue.depth";
   public static final String FS_AZURE_ALWAYS_READ_BUFFER_SIZE = "fs.azure.read.alwaysReadBufferSize";
   public static final String FS_AZURE_READ_AHEAD_BLOCK_SIZE = "fs.azure.read.readahead.blocksize";
+  /** Enable issuing GetLayout requests when files are opened to retrieve blob layout metadata. */
+  public static final String FS_AZURE_ENABLE_GET_LAYOUT_ON_OPEN = "fs.azure.enable.getLayoutOnOpen";
   /** Provides a config control to enable or disable ABFS Flush operations -
    *  HFlush and HSync. Default is true. **/
   public static final String FS_AZURE_ENABLE_FLUSH = "fs.azure.enable.flush";
@@ -485,6 +487,8 @@ public final class ConfigurationKeys {
   /** Key for SAS token provider: {@value}. **/
   public static final String FS_AZURE_SAS_TOKEN_PROVIDER_TYPE = "fs.azure.sas.token.provider.type";
 
+  public static final String FS_AZURE_ENABLE_READ_VECTORED_PARALLEL = "fs.azure.enable.read.vectored.parallel";
+
   /** For performance, AbfsInputStream/AbfsOutputStream re-use SAS tokens until the expiry is within this number of seconds. **/
   public static final String FS_AZURE_SAS_TOKEN_RENEW_PERIOD_FOR_STREAMS = "fs.azure.sas.token.renew.period.for.streams";
 
@@ -546,7 +550,7 @@ public final class ConfigurationKeys {
   public static final String FS_AZURE_BLOB_COPY_MAX_WAIT_MILLIS = "fs.azure.blob.copy.max.wait.millis";
   /**Blob rename lease refresh duration: {@value}*/
   public static final String FS_AZURE_BLOB_ATOMIC_RENAME_LEASE_REFRESH_DURATION
-          = "fs.azure.blob.atomic.rename.lease.refresh.duration";
+      = "fs.azure.blob.atomic.rename.lease.refresh.duration";
   /**Maximum number of blob information enqueued in memory for rename or delete orchestration: {@value}*/
   public static final String FS_AZURE_PRODUCER_QUEUE_MAX_SIZE = "fs.azure.blob.dir.list.producer.queue.max.size";
   /**
